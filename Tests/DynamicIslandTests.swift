@@ -245,8 +245,18 @@ struct DynamicIslandTests {
         check(ShelfPreviewHelper.classify(url: URL(fileURLWithPath: "/tmp/Makefile")) == .text, "Makefile should classify as text")
         check(ShelfPreviewHelper.classify(url: URL(fileURLWithPath: "/tmp/archive.zip")) == .other, "ZIP should classify as other")
 
-        let snippet = ShelfPreviewHelper.readTextSnippet(from: URL(fileURLWithPath: "/Users/make/project/MakeTools/README.md"))
-        check(snippet != nil && !(snippet?.isEmpty ?? true), "Should read non-empty text snippet from README.md")
+        let fixture = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("md")
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let expected = "# File shelf test"
+        do {
+            try expected.write(to: fixture, atomically: true, encoding: .utf8)
+            check(ShelfPreviewHelper.readTextSnippet(from: fixture) == expected,
+                  "Should read Markdown text from the shelf fixture")
+        } catch {
+            check(false, "Could not create shelf fixture: \(error)")
+        }
     }
 
     private static func testNonNotchGeometry() {
