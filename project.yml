@@ -1,0 +1,61 @@
+name: MakeTools
+options:
+  bundleIdPrefix: com.make
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "15.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+targets:
+  MakeTools:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/App
+        excludes:
+          - Info.plist
+          - App.entitlements
+      - path: Sources/Core
+      - path: Sources/Tools
+      - path: Samples/demo.md
+        buildPhase: resources
+      - path: Assets/MakeTools.icns
+        buildPhase: resources
+    info:
+      path: Sources/App/Info.plist
+    entitlements:
+      path: Sources/App/App.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.make.MakeTools
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - target: MarkdownQuickLook
+        embed: true
+
+  MarkdownQuickLook:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: Sources/Extensions/MarkdownQuickLook
+        excludes:
+          - Info.plist
+          - Extension.entitlements
+      - path: Sources/Core/ClipboardHelper.swift
+      - path: Sources/Core/ToolAppearance.swift
+      - path: Sources/Tools/MarkdownPreview/ThemeCSS.swift
+      - path: Sources/Tools/MarkdownPreview/MarkdownRenderer.swift
+      - path: Sources/Tools/MarkdownPreview/NativeMarkdownView.swift
+    info:
+      path: Sources/Extensions/MarkdownQuickLook/Info.plist
+    entitlements:
+      path: Sources/Extensions/MarkdownQuickLook/Extension.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.make.MakeTools.MarkdownQuickLook
+        APPLICATION_EXTENSION_API_ONLY: YES
+        CODE_SIGN_STYLE: Automatic
