@@ -15,6 +15,7 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
     private let status = NSTextField(wrappingLabelWithString: "")
     private let copyAccountButton = NSButton(title: "复制账户", target: nil, action: nil)
     private let copyPasswordButton = NSButton(title: "复制密码", target: nil, action: nil)
+    private let deleteButton = NSButton(title: "删除", target: nil, action: nil)
     private let saveButton = NSButton(title: "保存", target: nil, action: nil)
 
     private var entries: [PasswordBookEntry] = []
@@ -116,12 +117,14 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
 
         setup(copyAccountButton, symbol: "person.crop.rectangle", action: #selector(handleCopyAccount))
         setup(copyPasswordButton, symbol: "key", action: #selector(handleCopyPassword))
+        setup(deleteButton, symbol: "trash", action: #selector(handleDelete))
+        deleteButton.hasDestructiveAction = true
         setup(saveButton, symbol: "checkmark", action: #selector(handleSave))
         saveButton.keyEquivalent = "\r"
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.fittingSizeCompression, for: .horizontal)
-        let actions = NSStackView(views: [copyAccountButton, copyPasswordButton, spacer, saveButton])
+        let actions = NSStackView(views: [copyAccountButton, copyPasswordButton, spacer, deleteButton, saveButton])
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = 8
@@ -139,7 +142,8 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
             actions.trailingAnchor.constraint(equalTo: grid.trailingAnchor),
             status.topAnchor.constraint(equalTo: actions.bottomAnchor, constant: 10),
             status.leadingAnchor.constraint(equalTo: grid.leadingAnchor),
-            status.trailingAnchor.constraint(equalTo: grid.trailingAnchor)
+            status.trailingAnchor.constraint(equalTo: grid.trailingAnchor),
+            status.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -14)
         ])
 
         populatePicker(selecting: nil)
@@ -184,6 +188,7 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
         [websiteField, accountField, passwordField].forEach { $0.isEnabled = canEdit }
         copyAccountButton.isEnabled = canEdit && selectedEntry != nil
         copyPasswordButton.isEnabled = canEdit && selectedEntry != nil
+        deleteButton.isEnabled = canEdit && selectedEntry != nil
         saveButton.isEnabled = canEdit
     }
 
@@ -241,6 +246,27 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
             PasswordBookStore.sort(&entries)
             populatePicker(selecting: entry.id)
             status.stringValue = "已保存至钥匙串。"
+        }
+    }
+
+    @objc private func handleDelete() {
+        guard !isBusy, let entry = selectedEntry, let window, window.attachedSheet == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = "删除这条密码记录？"
+        alert.informativeText = "\(entry.website) · \(entry.account) 将从本机钥匙串移除。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "删除").hasDestructiveAction = true
+        let cancel = alert.addButton(withTitle: "取消")
+        cancel.keyEquivalent = "\r"
+        alert.buttons[0].keyEquivalent = ""
+        alert.beginSheetModal(for: window) { [weak self] result in
+            guard result == .alertFirstButtonReturn, let self else { return }
+            perform({ try $0.delete(id: entry.id) }) { [weak self] _ in
+                guard let self else { return }
+                entries.removeAll { $0.id == entry.id }
+                populatePicker(selecting: nil)
+                status.stringValue = "已删除记录。"
+            }
         }
     }
 

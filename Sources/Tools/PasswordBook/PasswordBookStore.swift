@@ -61,6 +61,11 @@ struct PasswordBookStore {
         }
     }
 
+    func delete(id: UUID) throws {
+        let status = SecItemDelete(itemQuery(for: id) as CFDictionary)
+        if status != errSecItemNotFound { try check(status) }
+    }
+
     func password(for id: UUID) throws -> String {
         var query = itemQuery(for: id)
         query[kSecMatchLimit as String] = kSecMatchLimitOne

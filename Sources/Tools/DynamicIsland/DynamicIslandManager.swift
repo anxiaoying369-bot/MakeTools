@@ -26,6 +26,9 @@ public final class DynamicIslandManager {
     private enum DefaultsKey {
         static let isEnabled = "MakeTools.DynamicIsland.isEnabled"
         static let style = "MakeTools.DynamicIsland.style"
+        static let expandedLayout = "MakeTools.DynamicIsland.expandedLayout"
+        static let expandedCardOrder = "MakeTools.DynamicIsland.expandedCardOrder"
+        static let hiddenExpandedCards = "MakeTools.DynamicIsland.hiddenExpandedCards"
         static let hoverToExpand = "MakeTools.DynamicIsland.hoverToExpand"
         static let dragToExpand = "MakeTools.DynamicIsland.dragToExpand"
         static let showCollapsedCustomTitle = "MakeTools.DynamicIsland.showCollapsedCustomTitle"
@@ -53,6 +56,63 @@ public final class DynamicIslandManager {
             windowController?.syncState(animated: true)
             notifyUpdated()
         }
+    }
+
+    private(set) var expandedLayout: IslandExpandedLayout
+    private(set) var expandedCardOrder: [IslandExpandedCard]
+    private(set) var hiddenExpandedCards: Set<IslandExpandedCard>
+    private(set) var calendarEvents: [CalendarCountdownEvent]
+    private let calendarStore = CalendarCountdownStore()
+    private(set) var expandedNotice: (title: String, detail: String)?
+
+    func setExpandedLayout(_ layout: IslandExpandedLayout) {
+        updateExpandedLayout(layout, order: expandedCardOrder)
+    }
+
+    func moveExpandedCard(_ card: IslandExpandedCard, by offset: Int) {
+        let movable = expandedCardOrder.indices.filter { expandedLayout == .grid || expandedCardOrder[$0] != .shelf }
+        guard let step = movable.firstIndex(where: { expandedCardOrder[$0] == card }),
+              movable.indices.contains(step + offset) else { return }
+        var order = expandedCardOrder
+        order.swapAt(movable[step], movable[step + offset])
+        updateExpandedLayout(expandedLayout, order: order)
+    }
+
+    func moveExpandedCard(_ card: IslandExpandedCard, onto target: IslandExpandedCard) {
+        let cards = activeExpandedCards
+        guard card != target, cards.contains(card), cards.contains(target) else { return }
+        if expandedLayout != .grid && (card == .shelf || target == .shelf) {
+            setExpandedLayout(expandedLayout == .shelfRight ? .shelfLeft : .shelfRight)
+        } else {
+            updateExpandedLayout(expandedLayout, order: IslandExpandedCard.moving(card, onto: target, in: expandedCardOrder))
+        }
+    }
+
+    func setExpandedCardHidden(_ card: IslandExpandedCard, hidden: Bool) {
+        var cards = hiddenExpandedCards
+        if hidden { cards.insert(card) } else { cards.remove(card) }
+        if card == .shelf && hidden { endExternalFileDrag(shouldCollapseIfNeeded: false) }
+        updateExpandedLayout(expandedLayout, order: expandedCardOrder, hidden: cards)
+    }
+
+    func resetExpandedLayout() {
+        updateExpandedLayout(.shelfRight, order: IslandExpandedCard.allCases, hidden: [])
+    }
+
+    private func updateExpandedLayout(
+        _ layout: IslandExpandedLayout, order: [IslandExpandedCard], hidden: Set<IslandExpandedCard>? = nil
+    ) {
+        let hidden = hidden ?? hiddenExpandedCards
+        guard layout != expandedLayout || order != expandedCardOrder || hidden != hiddenExpandedCards else { return }
+        expandedLayout = layout
+        expandedCardOrder = order
+        hiddenExpandedCards = hidden
+        UserDefaults.standard.set(layout.rawValue, forKey: DefaultsKey.expandedLayout)
+        UserDefaults.standard.set(order.map(\.rawValue), forKey: DefaultsKey.expandedCardOrder)
+        UserDefaults.standard.set(IslandExpandedCard.allCases.filter { hidden.contains($0) }.map(\.rawValue),
+                                  forKey: DefaultsKey.hiddenExpandedCards)
+        windowController?.syncState(animated: state == .expanded)
+        notifyUpdated()
     }
 
     public var hoverToExpand: Bool {
@@ -163,13 +223,24 @@ public final class DynamicIslandManager {
         keepAwakeController.isActive
     }
 
-    public var activeExpandedCardCount: Int {
-        var count = 0
-        if isFeatureEnabled(.systemMonitor) || isFeatureEnabled(.networkSpeed) { count += 1 }
-        if isFeatureEnabled(.audioControl) || isFeatureEnabled(.keepAwake) { count += 1 }
-        if isFeatureEnabled(.focusTimer) { count += 1 }
-        if isFeatureEnabled(.fileShelf) { count += 1 }
-        return count
+    public var activeExpandedCardCount: Int { activeExpandedCards.count }
+
+    var activeExpandedCards: [IslandExpandedCard] {
+        expandedCardOrder.filter { !hiddenExpandedCards.contains($0) && isExpandedCardEnabled($0) }
+    }
+
+    var isFileShelfVisible: Bool { isExpandedCardEnabled(.shelf) && !hiddenExpandedCards.contains(.shelf) }
+
+    func isExpandedCardEnabled(_ card: IslandExpandedCard) -> Bool {
+        switch card {
+        case .performance:
+            return isFeatureEnabled(.systemMonitor) || isFeatureEnabled(.downloadSpeed) || isFeatureEnabled(.uploadSpeed)
+        case .audio: return isFeatureEnabled(.audioControl) || isFeatureEnabled(.keepAwake)
+        case .focus: return isFeatureEnabled(.focusTimer)
+        case .shelf: return isFeatureEnabled(.fileShelf)
+        case .calendar: return isFeatureEnabled(.calendarCountdown)
+        case .bookmarks: return isFeatureEnabled(.webBookmarks)
+        }
     }
 
     public var onOpenMainWindow: (() -> Void)?
@@ -177,6 +248,7 @@ public final class DynamicIslandManager {
     private let metricsReader = SystemMetricsReader()
     private var featureStates: [DynamicIslandFeature: Bool] = [:]
     private var collapsedMetrics: Set<CollapsedMetricItem> = []
+    private var collapsedMetricRotation = CollapsedMetricRotation()
     private var windowController: DynamicIslandWindowController?
     private var tickTimer: Timer?
     private var hudDismissWorkItem: DispatchWorkItem?
@@ -191,6 +263,7 @@ public final class DynamicIslandManager {
 
     private init() {
         let defaults = UserDefaults.standard
+        self.calendarEvents = CalendarCountdownStore(defaults: defaults).load()
         if defaults.object(forKey: DefaultsKey.isEnabled) == nil {
             defaults.set(true, forKey: DefaultsKey.isEnabled)
         }
@@ -198,6 +271,14 @@ public final class DynamicIslandManager {
 
         let rawStyle = defaults.integer(forKey: DefaultsKey.style)
         self.style = DynamicIslandStyle(rawValue: rawStyle) ?? .auto
+        let savedLayout = defaults.string(forKey: DefaultsKey.expandedLayout) ?? ""
+        self.expandedLayout = IslandExpandedLayout(rawValue: savedLayout) ?? .shelfRight
+        self.expandedCardOrder = IslandExpandedCard.restoredOrder(
+            from: defaults.stringArray(forKey: DefaultsKey.expandedCardOrder) ?? []
+        )
+        self.hiddenExpandedCards = Set(
+            (defaults.stringArray(forKey: DefaultsKey.hiddenExpandedCards) ?? []).compactMap(IslandExpandedCard.init(rawValue:))
+        )
 
         if defaults.object(forKey: DefaultsKey.hoverToExpand) == nil {
             defaults.set(true, forKey: DefaultsKey.hoverToExpand)
@@ -217,20 +298,16 @@ public final class DynamicIslandManager {
         let storedCustomWidth = CGFloat(defaults.double(forKey: DefaultsKey.collapsedCustomWidth))
         self.collapsedCustomWidth = storedCustomWidth > 0 ? min(680, max(160, storedCustomWidth)) : 0
 
-        if let storedMetrics = defaults.array(forKey: DefaultsKey.collapsedMetrics) as? [String] {
-            self.collapsedMetrics = Set(storedMetrics.compactMap(CollapsedMetricItem.init(rawValue:)))
-        } else {
-            let defaultsSet = Set(CollapsedMetricItem.allCases.filter(\.defaultEnabled))
-            self.collapsedMetrics = defaultsSet
-            defaults.set(defaultsSet.map(\.rawValue), forKey: DefaultsKey.collapsedMetrics)
+        let storedMetrics = defaults.stringArray(forKey: DefaultsKey.collapsedMetrics)
+        let selection = CollapsedMetricItem.restoredSelection(from: storedMetrics)
+        self.collapsedMetrics = selection
+        if storedMetrics == nil || storedMetrics?.contains("networkSpeed") == true {
+            defaults.set(CollapsedMetricItem.allCases.filter { selection.contains($0) }.map(\.rawValue),
+                         forKey: DefaultsKey.collapsedMetrics)
         }
 
         for feature in DynamicIslandFeature.allCases {
-            let key = DefaultsKey.featurePrefix + feature.rawValue
-            if defaults.object(forKey: key) == nil {
-                defaults.set(feature.defaultEnabled, forKey: key)
-            }
-            featureStates[feature] = defaults.bool(forKey: key)
+            featureStates[feature] = feature.initialEnabled(in: defaults, keyPrefix: DefaultsKey.featurePrefix)
         }
 
         self.lastPasteboardChangeCount = NSPasteboard.general.changeCount
@@ -240,6 +317,27 @@ public final class DynamicIslandManager {
             self.clipboardEntries = [entry]
         }
         self.latestSnapshot = metricsReader.sample()
+    }
+
+    func saveCalendarEvent(_ event: CalendarCountdownEvent) throws {
+        var updated = calendarEvents
+        if let index = updated.firstIndex(where: { $0.id == event.id }) {
+            updated[index] = event
+        } else {
+            updated.append(event)
+        }
+        try updateCalendarEvents(updated)
+    }
+
+    func removeCalendarEvent(id: UUID) throws {
+        try updateCalendarEvents(calendarEvents.filter { $0.id != id })
+    }
+
+    private func updateCalendarEvents(_ events: [CalendarCountdownEvent]) throws {
+        try calendarStore.save(events)
+        calendarEvents = events
+        windowController?.refreshContents()
+        notifyUpdated()
     }
 
     // MARK: - Feature Toggles
@@ -271,20 +369,27 @@ public final class DynamicIslandManager {
     }
 
     public func setCollapsedMetric(_ item: CollapsedMetricItem, enabled: Bool) {
+        guard enabled != collapsedMetrics.contains(item) else { return }
         if enabled {
             collapsedMetrics.insert(item)
         } else {
             collapsedMetrics.remove(item)
         }
+        collapsedMetricRotation = CollapsedMetricRotation()
         UserDefaults.standard.set(collapsedMetrics.map(\.rawValue), forKey: DefaultsKey.collapsedMetrics)
         windowController?.syncState(animated: state == .collapsed)
         notifyUpdated()
     }
 
-    public func collapsedDisplayContent(
-        now: Date = Date(),
-        splitForNotch: Bool = false
-    ) -> (leftText: String?, rightText: String?) {
+    var currentCollapsedMetric: CollapsedMetricItem? {
+        collapsedMetricRotation.current(in: orderedEnabledCollapsedMetrics, uptime: ProcessInfo.processInfo.systemUptime)
+    }
+
+    public func collapsedDisplayContent(now: Date = Date()) -> (leftText: String?, rightText: String?) {
+        (collapsedStatusText, currentCollapsedMetric.map { latestSnapshot.formatCollapsedMetric($0, now: now) })
+    }
+
+    var collapsedStatusText: String? {
         let leftText: String?
         if isFeatureEnabled(.focusTimer), focusTimer.isRunning {
             leftText = "专注 \(focusTimer.formattedRemaining)"
@@ -299,17 +404,7 @@ public final class DynamicIslandManager {
             leftText = nil
         }
 
-        let metricParts = orderedEnabledCollapsedMetrics.map {
-            latestSnapshot.formatCollapsedMetric($0, now: now)
-        }
-        if splitForNotch, leftText == nil, metricParts.count >= 2 {
-            let splitIndex = (metricParts.count + 1) / 2
-            let leftMetrics = metricParts[..<splitIndex].joined(separator: " · ")
-            let rightMetrics = metricParts[splitIndex...].joined(separator: " · ")
-            return (leftMetrics, rightMetrics)
-        }
-        let rightText = metricParts.isEmpty ? nil : metricParts.joined(separator: " · ")
-        return (leftText, rightText)
+        return leftText
     }
 
     // MARK: - Lifecycle
@@ -373,6 +468,7 @@ public final class DynamicIslandManager {
         dragAutoCollapseWorkItem = nil
         hudDismissWorkItem?.cancel()
         hudDismissWorkItem = nil
+        expandedNotice = nil
         tickTimer?.invalidate()
         tickTimer = nil
         if let screenObserver {
@@ -422,7 +518,7 @@ public final class DynamicIslandManager {
             // A previous Finder drag can leave its file URLs on this pasteboard.
             fileDragGesture.mouseDown(pasteboardChangeCount: NSPasteboard(name: .drag).changeCount)
         case .leftMouseDragged:
-            guard isEnabled, dragToExpand, isFeatureEnabled(.fileShelf),
+            guard isEnabled, dragToExpand, isFileShelfVisible,
                   !isInternalDragInProgress, !isExternalFileDragActive else { return }
 
             let dragPasteboard = NSPasteboard(name: .drag)
@@ -474,11 +570,6 @@ public final class DynamicIslandManager {
         dragAutoCollapseWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            guard !self.isPinned, !self.isExternalFileDragActive else { return }
-            if let panelFrame = self.windowController?.currentPanelFrame,
-               panelFrame.contains(NSEvent.mouseLocation) {
-                return
-            }
             self.collapse(force: false)
         }
         dragAutoCollapseWorkItem = item
@@ -503,14 +594,16 @@ public final class DynamicIslandManager {
         dragAutoCollapseWorkItem = nil
         hudDismissWorkItem?.cancel()
         hudDismissWorkItem = nil
+        expandedNotice = nil
         state = .expanded
         windowController?.syncState(animated: true)
         notifyUpdated()
     }
 
     public func collapse(force: Bool = false) {
-        if isPinned && !force {
-            return
+        if !force {
+            guard state == .expanded, !isPinned, !isExternalFileDragActive, !isInternalDragInProgress,
+                  windowController?.blocksAutomaticCollapse != true else { return }
         }
         if force {
             isPinned = false
@@ -520,6 +613,7 @@ public final class DynamicIslandManager {
         dragAutoCollapseWorkItem = nil
         hudDismissWorkItem?.cancel()
         hudDismissWorkItem = nil
+        expandedNotice = nil
         state = .collapsed
         windowController?.syncState(animated: true)
         notifyUpdated()
@@ -546,17 +640,26 @@ public final class DynamicIslandManager {
             isEnabled = true
         }
         hudDismissWorkItem?.cancel()
-        state = .hud(title: title, detail: detail, symbolName: symbolName)
-        windowController?.syncState(animated: true)
+        if state == .expanded {
+            expandedNotice = (title, detail)
+            windowController?.refreshContents()
+        } else {
+            state = .hud(title: title, detail: detail, symbolName: symbolName)
+            windowController?.syncState(animated: true)
+        }
         notifyUpdated()
 
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            if case .hud = self.state {
-                self.state = .collapsed
-                self.windowController?.syncState(animated: true)
-                self.notifyUpdated()
+            hudDismissWorkItem = nil
+            if case .hud = state {
+                state = .collapsed
+                windowController?.syncState(animated: true)
+            } else if expandedNotice != nil {
+                expandedNotice = nil
+                windowController?.refreshContents()
             }
+            notifyUpdated()
         }
         hudDismissWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: workItem)

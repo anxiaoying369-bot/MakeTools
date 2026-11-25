@@ -74,6 +74,12 @@ swiftc \
     "${ROOT_DIR}/Sources/Tools/DynamicIsland/DynamicIslandViewController.swift" \
     "${ROOT_DIR}/Sources/Tools/PasswordBook/PasswordBookStore.swift" \
     "${ROOT_DIR}/Sources/Tools/PasswordBook/PasswordBookWindowController.swift" \
+    "${ROOT_DIR}/Sources/Tools/Calendar/CalendarCountdown.swift" \
+    "${ROOT_DIR}/Sources/Tools/Calendar/CalendarMonthGrid.swift" \
+    "${ROOT_DIR}/Sources/Tools/Calendar/ChinaHolidayCalendar.swift" \
+    "${ROOT_DIR}/Sources/Tools/Calendar/CalendarCountdownWindowController.swift" \
+    "${ROOT_DIR}/Sources/Tools/WebBookmarks/WebBookmarkStore.swift" \
+    "${ROOT_DIR}/Sources/Tools/WebBookmarks/WebBookmarksWindowController.swift" \
     "${ROOT_DIR}/Sources/Tools/ExtensionsOverview/ExtensionsOverviewViewController.swift" \
     "${ROOT_DIR}/Sources/App/MainWindowController.swift" \
     "${ROOT_DIR}/Sources/App/AppDelegate.swift" \

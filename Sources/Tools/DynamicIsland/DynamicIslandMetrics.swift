@@ -10,54 +10,76 @@ import UniformTypeIdentifiers
 /// Individual toggleable feature modules inside the Dynamic Island.
 public enum DynamicIslandFeature: String, CaseIterable {
     case systemMonitor
-    case networkSpeed
+    case downloadSpeed
+    case uploadSpeed
     case audioControl
     case focusTimer
     case fileShelf
     case keepAwake
     case clipboardHistory
     case batteryAlerts
+    case calendarCountdown
+    case webBookmarks
 
     public var title: String {
         switch self {
         case .systemMonitor: return "性能监控（CPU / 内存）"
-        case .networkSpeed: return "实时网速"
+        case .downloadSpeed: return "下行网速"
+        case .uploadSpeed: return "上行网速"
         case .audioControl: return "音量控制与 HUD 提醒"
         case .focusTimer: return "专注倒计时"
         case .fileShelf: return "文件暂存架与隔空投送"
         case .keepAwake: return "屏幕防休眠（咖啡因）"
         case .clipboardHistory: return "剪贴板历史与复制提示"
         case .batteryAlerts: return "电池充放电与低电量提醒"
+        case .calendarCountdown: return "日历与日期倒计时"
+        case .webBookmarks: return "网络书签"
         }
     }
 
     public var subtitle: String {
         switch self {
         case .systemMonitor: return "实时显示 CPU 负载、内存占用及进度条"
-        case .networkSpeed: return "在收起栏与面板中显示实时下行 / 上行网速"
+        case .downloadSpeed: return "在展开面板显示实时下载速度"
+        case .uploadSpeed: return "在展开面板显示实时上传速度"
         case .audioControl: return "支持音量调节、一键静音及音量变动灵动提示"
         case .focusTimer: return "内置番茄钟倒计时，收起后仍在顶部持续显示"
         case .fileShelf: return "九宫格多文件暂存，拖动文件自动弹出，支持点选/拖出/隔空投送"
         case .keepAwake: return "一键阻止 Mac 自动息屏与休眠，适合演示或长时间下载"
         case .clipboardHistory: return "记录最近 8 条复制内容并支持历史切换与一键恢复"
         case .batteryAlerts: return "接入/断开电源或电量低于 20% 时在灵动岛弹出提示"
+        case .calendarCountdown: return "浏览月历，查看事件还剩几天或已过去几天"
+        case .webBookmarks: return "保存常用网页并用默认浏览器打开"
         }
     }
 
     public var symbolName: String {
         switch self {
         case .systemMonitor: return "cpu"
-        case .networkSpeed: return "arrow.up.arrow.down"
+        case .downloadSpeed: return "arrow.down"
+        case .uploadSpeed: return "arrow.up"
         case .audioControl: return "speaker.wave.2.fill"
         case .focusTimer: return "timer"
         case .fileShelf: return "tray.and.arrow.down.fill"
         case .keepAwake: return "cup.and.saucer.fill"
         case .clipboardHistory: return "doc.on.clipboard.fill"
         case .batteryAlerts: return "battery.100.bolt"
+        case .calendarCountdown: return "calendar"
+        case .webBookmarks: return "bookmark"
         }
     }
 
     public var defaultEnabled: Bool { true }
+
+    func initialEnabled(in defaults: UserDefaults, keyPrefix: String) -> Bool {
+        let key = keyPrefix + rawValue
+        if let value = defaults.object(forKey: key) as? Bool { return value }
+        let legacy = (self == .downloadSpeed || self == .uploadSpeed)
+            ? defaults.object(forKey: keyPrefix + "networkSpeed") as? Bool : nil
+        let enabled = legacy ?? defaultEnabled
+        defaults.set(enabled, forKey: key)
+        return enabled
+    }
 }
 
 /// Display style for the floating Dynamic Island overlay.
@@ -75,11 +97,94 @@ public enum DynamicIslandStyle: Int, CaseIterable {
     }
 }
 
+public enum IslandExpandedLayout: String, CaseIterable {
+    case shelfRight
+    case shelfLeft
+    case grid
+
+    var title: String {
+        switch self {
+        case .shelfRight: return "暂存架靠右"
+        case .shelfLeft: return "暂存架靠左"
+        case .grid: return "双列网格"
+        }
+    }
+
+    static let spacing: CGFloat = 8
+    static let compactSpacing: CGFloat = 7
+    static let minimumCompactHeight: CGFloat = 72
+    static let cardHeight: CGFloat = 106
+    static let shelfHeight: CGFloat = 230
+
+    func bodySize(cardCount: Int, hasShelf: Bool) -> NSSize {
+        guard cardCount > 0 else { return NSSize(width: 360, height: 0) }
+        if usesGrid(cardCount: cardCount, hasShelf: hasShelf) {
+            let rows = (cardCount + 1) / 2
+            let standardHeight = CGFloat(rows) * Self.cardHeight + CGFloat(rows - 1) * Self.spacing
+            let extraHeight = hasShelf ? Self.shelfHeight - Self.cardHeight : 0
+            return NSSize(width: cardCount > 1 ? 512 : 360, height: standardHeight + extraHeight)
+        }
+        if hasShelf {
+            let compactCount = CGFloat(cardCount - 1)
+            let compactHeight = compactCount * Self.minimumCompactHeight
+                + max(0, compactCount - 1) * Self.compactSpacing
+            return NSSize(width: cardCount > 1 ? 512 : 360, height: max(Self.shelfHeight, compactHeight))
+        }
+        return NSSize(width: 456, height: Self.cardHeight)
+    }
+
+    func usesGrid(cardCount: Int, hasShelf: Bool) -> Bool {
+        self == .grid || (!hasShelf && cardCount > 3)
+    }
+
+    func gridRows(for cards: [IslandExpandedCard]) -> [[IslandExpandedCard]] {
+        stride(from: 0, to: cards.count, by: 2).map { start in
+            Array(cards[start..<min(start + 2, cards.count)])
+        }
+    }
+}
+
+enum IslandExpandedCard: String, CaseIterable {
+    case performance
+    case audio
+    case focus
+    case shelf
+    case calendar
+    case bookmarks
+
+    var title: String {
+        switch self {
+        case .performance: return "性能与网速"
+        case .audio: return "音频与防休眠"
+        case .focus: return "专注"
+        case .shelf: return "暂存架"
+        case .calendar: return "日历"
+        case .bookmarks: return "网络书签"
+        }
+    }
+
+    static func moving(_ card: Self, onto target: Self, in order: [Self]) -> [Self] {
+        guard card != target, let source = order.firstIndex(of: card),
+              let destination = order.firstIndex(of: target) else { return order }
+        var result = order
+        result.remove(at: source)
+        result.insert(card, at: destination)
+        return result
+    }
+
+    static func restoredOrder(from rawValues: [String]) -> [Self] {
+        var seen = Set<Self>()
+        let saved = rawValues.compactMap(Self.init(rawValue:)).filter { seen.insert($0).inserted }
+        return saved + allCases.filter { !seen.contains($0) }
+    }
+}
+
 /// Metrics that can be independently toggled for display on the collapsed Dynamic Island bar.
 public enum CollapsedMetricItem: String, CaseIterable {
     case cpu
     case memory
-    case networkSpeed
+    case downloadSpeed
+    case uploadSpeed
     case battery
     case volume
     case clock
@@ -88,7 +193,8 @@ public enum CollapsedMetricItem: String, CaseIterable {
         switch self {
         case .cpu: return "CPU"
         case .memory: return "内存"
-        case .networkSpeed: return "网速"
+        case .downloadSpeed: return "下行网速"
+        case .uploadSpeed: return "上行网速"
         case .battery: return "电量"
         case .volume: return "音量"
         case .clock: return "时间"
@@ -96,7 +202,30 @@ public enum CollapsedMetricItem: String, CaseIterable {
     }
 
     public var defaultEnabled: Bool {
-        self == .cpu || self == .networkSpeed
+        self == .cpu || self == .downloadSpeed || self == .uploadSpeed
+    }
+
+    static func restoredSelection(from stored: [String]?) -> Set<Self> {
+        guard let stored else { return Set(allCases.filter(\.defaultEnabled)) }
+        var selection = Set(stored.compactMap(Self.init(rawValue:)))
+        if stored.contains("networkSpeed") {
+            selection.formUnion([.downloadSpeed, .uploadSpeed])
+        }
+        return selection
+    }
+}
+
+struct CollapsedMetricRotation {
+    static let interval: TimeInterval = 3
+
+    var startedAt: TimeInterval = ProcessInfo.processInfo.systemUptime
+
+    func current(in metrics: [CollapsedMetricItem], uptime: TimeInterval) -> CollapsedMetricItem? {
+        guard metrics.count > 1 else { return metrics.first }
+        let elapsed = max(0, uptime - startedAt)
+        let cycle = Self.interval * Double(metrics.count)
+        let offset = elapsed.truncatingRemainder(dividingBy: cycle)
+        return metrics[Int(offset / Self.interval)]
     }
 }
 
@@ -307,8 +436,10 @@ public struct SystemSnapshot: Equatable {
             return "CPU \(cpuPercentInt)%"
         case .memory:
             return "内存 \(memoryPercentInt)%"
-        case .networkSpeed:
-            return "↓\(Self.formatCompactSpeed(downloadBytesPerSec)) ↑\(Self.formatCompactSpeed(uploadBytesPerSec))"
+        case .downloadSpeed:
+            return "↓\(Self.formatCompactSpeed(downloadBytesPerSec))"
+        case .uploadSpeed:
+            return "↑\(Self.formatCompactSpeed(uploadBytesPerSec))"
         case .battery:
             if let pct = batteryPercent {
                 return "\(isCharging ? "⚡" : "")\(pct)%"
@@ -364,7 +495,8 @@ public struct IslandGeometry: Equatable {
         expandedCardCount: Int = 4,
         hasFileShelf: Bool = true,
         showFooter: Bool = true,
-        collapsedDesiredWidth: CGFloat? = nil
+        collapsedDesiredWidth: CGFloat? = nil,
+        expandedLayout: IslandExpandedLayout = .shelfRight
     ) -> IslandGeometry {
         let attached = (style != .floatingPill)
         let earRadius: CGFloat = attached ? 10 : 0
@@ -396,18 +528,10 @@ public struct IslandGeometry: Equatable {
             pillWidth = 308
             pillHeight = hudContentTopInset + hudRowHeight
         case .expanded:
-            let totalCards = max(0, expandedCardCount)
-            let nonShelfCount = max(0, totalCards - (hasFileShelf ? 1 : 0))
-            let bentoHeight: CGFloat
-            if hasFileShelf {
-                pillWidth = nonShelfCount > 0 ? 512 : 360
-                bentoHeight = 230
-            } else {
-                pillWidth = nonShelfCount == 0 ? 360 : 456
-                bentoHeight = nonShelfCount == 0 ? 0 : 106
-            }
+            let bodySize = expandedLayout.bodySize(cardCount: expandedCardCount, hasShelf: hasFileShelf)
+            pillWidth = bodySize.width
             let footerHeight: CGFloat = showFooter ? 30 : 0
-            pillHeight = 12 + 24 + (bentoHeight > 0 ? 8 + bentoHeight : 0) + footerHeight + 12
+            pillHeight = 12 + 24 + (bodySize.height > 0 ? 8 + bodySize.height : 0) + footerHeight + 12
         }
 
         pillWidth = min(pillWidth, max(160, screenFrame.width - 48))
@@ -437,6 +561,10 @@ public struct IslandGeometry: Equatable {
             notchReservedWidth: notchReserved,
             hudContentTopInset: hudContentTopInset
         )
+    }
+
+    func interactionRect(for visiblePill: NSRect) -> NSRect {
+        visiblePill.insetBy(dx: -earRadius, dy: 0)
     }
 
     /// Estimates the hardware camera notch width when running on a notched Mac display.

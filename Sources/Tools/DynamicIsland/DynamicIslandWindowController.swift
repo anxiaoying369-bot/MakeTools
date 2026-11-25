@@ -277,6 +277,76 @@ private final class IslandChipButton: IslandButton {
     }
 }
 
+private final class IslandCardEditOverlay: NSView, NSDraggingSource {
+    static let dragType = NSPasteboard.PasteboardType("com.make.MakeTools.island-card")
+    let card: IslandExpandedCard
+    var onRemove: (() -> Void)?
+    var isDropTarget = false {
+        didSet {
+            layer?.borderWidth = isDropTarget ? 2 : 1
+            layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(isDropTarget ? 1 : 0.55).cgColor
+        }
+    }
+    private var dragStart: NSPoint?
+
+    init(card: IslandExpandedCard) {
+        self.card = card
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 14
+        layer?.cornerCurve = .continuous
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.25).cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.55).cgColor
+        toolTip = "拖动\(card.title)以调整位置"
+
+        let grip = ToolAppearance.icon("line.3.horizontal", size: 13, tint: .white)
+        grip.translatesAutoresizingMaskIntoConstraints = false
+        let remove = IslandIconButton(
+            symbolName: "minus", accessibilityLabel: "移除\(card.title)", diameter: 21,
+            target: self, action: #selector(removeCard)
+        )
+        remove.normalBackground = NSColor(srgbRed: 0.72, green: 0.22, blue: 0.27, alpha: 1)
+        addSubview(grip)
+        addSubview(remove)
+        NSLayoutConstraint.activate([
+            grip.centerXAnchor.constraint(equalTo: centerXAnchor),
+            grip.centerYAnchor.constraint(equalTo: centerYAnchor),
+            remove.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            remove.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    @objc private func removeCard() { onRemove?() }
+
+    override func mouseDown(with event: NSEvent) {
+        dragStart = convert(event.locationInWindow, from: nil)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = dragStart else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard hypot(point.x - start.x, point.y - start.y) >= 4 else { return }
+        dragStart = nil
+        let item = NSPasteboardItem()
+        item.setString(card.rawValue, forType: Self.dragType)
+        let draggingItem = NSDraggingItem(pasteboardWriter: item)
+        let image = NSImage(systemSymbolName: "rectangle.on.rectangle", accessibilityDescription: card.title)
+        draggingItem.setDraggingFrame(NSRect(x: point.x - 16, y: point.y - 16, width: 32, height: 32), contents: image)
+        beginDraggingSession(with: [draggingItem], event: event, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) { dragStart = nil }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .withinApplication ? .move : []
+    }
+}
+
 /// Cached preview payload for staged shelf files.
 private enum ShelfPreviewContent {
     case image(NSImage)
@@ -644,7 +714,7 @@ private final class ShelfGridCellView: NSView, NSDraggingSource {
 }
 
 /// Main visual view rendered inside `DynamicIslandPanel` with authentic Apple Notch silhouette & 3x3 File Shelf.
-public final class DynamicIslandContentView: NSView {
+public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate {
     private weak var manager: DynamicIslandManager?
 
     private var trackingArea: NSTrackingArea?
@@ -652,6 +722,32 @@ public final class DynamicIslandContentView: NSView {
     private var hoverOutWorkItem: DispatchWorkItem?
     private var clipboardMenu: NSMenu?
     private lazy var passwordBook = PasswordBookWindowController()
+    private var calendarCountdown: CalendarCountdownWindowController?
+    private let webBookmarkStore = WebBookmarkStore()
+    private var webBookmarks: [WebBookmark] = []
+    private lazy var webBookmarksWindow: WebBookmarksWindowController = {
+        let controller = WebBookmarksWindowController(store: webBookmarkStore)
+        controller.onChange = { [weak self] bookmarks in
+            self?.webBookmarks = bookmarks
+            self?.refreshBookmarkCard()
+        }
+        return controller
+    }()
+    private var isEditingLayout = false
+    private var cardEditors: [IslandExpandedCard: IslandCardEditOverlay] = [:]
+    private var cardDropTarget: IslandExpandedCard? {
+        didSet {
+            guard cardDropTarget != oldValue else { return }
+            if let oldValue { cardEditors[oldValue]?.isDropTarget = false }
+            if let cardDropTarget { cardEditors[cardDropTarget]?.isDropTarget = true }
+        }
+    }
+    private let editLayoutButton = IslandIconButton(
+        symbolName: "pencil", accessibilityLabel: "编辑组件", target: nil, action: nil
+    )
+    private let addCardButton = IslandIconButton(
+        symbolName: "plus", accessibilityLabel: "添加组件", target: nil, action: nil
+    )
     private var isDragHighlighted = false
 
     private static let outline = NSColor(white: 1, alpha: 0.16).cgColor
@@ -684,6 +780,7 @@ public final class DynamicIslandContentView: NSView {
     private let rightWingContainer = NSStackView()
     private let collapsedRightSpacer = NSView()
     private let collapsedMetricLabel = NSTextField(labelWithString: "CPU 0%")
+    private var displayedCollapsedMetric: CollapsedMetricItem?
     private var collapsedEqualWingsConstraint: NSLayoutConstraint?
 
     // HUD subviews
@@ -711,7 +808,8 @@ public final class DynamicIslandContentView: NSView {
     private let memGroup = NSStackView()
     private let memValueLabel = NSTextField(labelWithString: "0%")
     private let memBar = IslandProgressBar()
-    private let netSpeedLabel = NSTextField(labelWithString: "↓ 0 B/s")
+    private let downloadSpeedLabel = NSTextField(labelWithString: "↓ 0 B/s")
+    private let uploadSpeedLabel = NSTextField(labelWithString: "↑ 0 B/s")
 
     // Bento Card B: Audio & Keep-Awake (compact 72pt height)
     private var audioCard = IslandCardView()
@@ -747,6 +845,19 @@ public final class DynamicIslandContentView: NSView {
         action: nil
     )
 
+    private var bookmarkCard = IslandCardView()
+    private let bookmarkEmptyLabel = NSTextField(labelWithString: "添加常用网页，点击名称即可打开")
+    private var bookmarkLinks: [IslandChipButton] = []
+    private weak var bookmarkManageButton: IslandChipButton?
+
+    private var calendarCard = IslandCardView()
+    private let calendarDateLabel = NSTextField(labelWithString: "")
+    private let calendarEventLabel = NSTextField(labelWithString: "")
+    private let calendarHolidayLabel = NSTextField(labelWithString: "")
+    private var calendarHolidayRevision = -1
+    private var calendarDisplayDay: CountdownDay?
+    private var displayedCalendarEvents: [CalendarCountdownEvent] = []
+
     // Bento Card D: 3x3 File Shelf (230pt height)
     private var shelfCard = IslandCardView()
     private let shelfHeaderLabel = NSTextField(labelWithString: "暂存架 (0/9)")
@@ -758,7 +869,10 @@ public final class DynamicIslandContentView: NSView {
     private let clipboardIndexLabel = NSTextField(labelWithString: "0/0")
     private let clipboardLabel = NSTextField(labelWithString: "剪贴板: 暂无文本")
 
-    private var lastBentoSignature: String = ""
+    private var lastExpandedLayout: IslandExpandedLayout?
+    private var lastExpandedCards: [IslandExpandedCard] = []
+    private var bentoStacks: [NSStackView] = []
+    private var bentoConstraints: [NSLayoutConstraint] = []
     private var displayedState: DynamicIslandState?
 
     private static let clockFormatter: DateFormatter = {
@@ -777,7 +891,7 @@ public final class DynamicIslandContentView: NSView {
         self.manager = manager
         super.init(frame: .zero)
         setupView()
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes([.fileURL, IslandCardEditOverlay.dragType])
     }
 
     @available(*, unavailable)
@@ -880,17 +994,20 @@ public final class DynamicIslandContentView: NSView {
 
     public func preferredCollapsedPillWidth(notchReservedWidth: CGFloat = 0) -> CGFloat {
         guard let manager else { return 196 }
-        let splitForNotch = notchReservedWidth > 0
-        let (leftText, rightText) = manager.collapsedDisplayContent(splitForNotch: splitForNotch)
+        let leftText = manager.collapsedStatusText
+        let metrics = manager.orderedEnabledCollapsedMetrics
+        let now = Date()
         let leftFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
         let rightFont = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
 
         let leftTextWidth: CGFloat = leftText.map {
             ceil(NSAttributedString(string: $0, attributes: [.font: leftFont]).size().width)
         } ?? 0
-        let rightTextWidth: CGFloat = rightText.map {
-            ceil(NSAttributedString(string: $0, attributes: [.font: rightFont]).size().width)
-        } ?? 0
+        // Reserve room for the widest selected metric so the panel does not resize as it rotates.
+        let rightTextWidth = metrics.map { metric in
+            let text = manager.latestSnapshot.formatCollapsedMetric(metric, now: now)
+            return ceil(NSAttributedString(string: text, attributes: [.font: rightFont]).size().width)
+        }.max() ?? 0
 
         if notchReservedWidth > 0 {
             let leftWingNeeded = 6 + (leftTextWidth > 0 ? (6 + leftTextWidth) : 0)
@@ -901,9 +1018,9 @@ public final class DynamicIslandContentView: NSView {
 
         var width: CGFloat = 26 + 6 + 6 // edgeInsets (13*2) + dot (6) + dot spacing (6)
         width += leftTextWidth + rightTextWidth
-        if leftText != nil && rightText != nil {
+        if leftText != nil && !metrics.isEmpty {
             width += 16
-        } else if leftText != nil || rightText != nil {
+        } else if leftText != nil || !metrics.isEmpty {
             width += 4
         }
         return max(136, ceil(width))
@@ -984,6 +1101,8 @@ public final class DynamicIslandContentView: NSView {
 
         expandedClockLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
         expandedClockLabel.textColor = .white
+        expandedClockLabel.lineBreakMode = .byTruncatingTail
+        expandedClockLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         expandedBatteryIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
         expandedBatteryIcon.contentTintColor = NSColor(white: 0.70, alpha: 1.0)
@@ -1023,6 +1142,13 @@ public final class DynamicIslandContentView: NSView {
         headerRow.addArrangedSubview(headerSpacer)
         headerRow.addArrangedSubview(pinButton)
         headerRow.addArrangedSubview(passwordBookButton)
+        editLayoutButton.target = self
+        editLayoutButton.action = #selector(toggleLayoutEditing)
+        addCardButton.target = self
+        addCardButton.action = #selector(showHiddenCards(_:))
+        addCardButton.isHidden = true
+        headerRow.addArrangedSubview(editLayoutButton)
+        headerRow.addArrangedSubview(addCardButton)
         headerRow.addArrangedSubview(openAppBtn)
         headerRow.addArrangedSubview(collapseBtn)
 
@@ -1030,13 +1156,25 @@ public final class DynamicIslandContentView: NSView {
         bentoHost.orientation = .horizontal
         bentoHost.alignment = .top
         bentoHost.distribution = .fillEqually
-        bentoHost.spacing = 8
+        bentoHost.spacing = IslandExpandedLayout.spacing
         bentoHost.translatesAutoresizingMaskIntoConstraints = false
 
         systemCard = buildSystemCard()
         audioCard = buildAudioAndKeepAwakeCard()
         timerCard = buildTimerCard()
+        calendarCard = buildCalendarCard()
+        bookmarkCard = buildBookmarkCard()
+        webBookmarks = (try? webBookmarkStore.load()) ?? []
+        refreshBookmarkCard()
         shelfCard = buildShelfCard()
+        for card in IslandExpandedCard.allCases {
+            let view = cardView(for: card)
+            let gesture = NSPressGestureRecognizer(target: self, action: #selector(handleLayoutPress(_:)))
+            gesture.minimumPressDuration = 0.45
+            gesture.delaysPrimaryMouseButtonEvents = false
+            gesture.delegate = self
+            view.addGestureRecognizer(gesture)
+        }
 
         // Footer row (22pt): Clipboard history
         footerRow.orientation = .horizontal
@@ -1090,7 +1228,7 @@ public final class DynamicIslandContentView: NSView {
             footerRow.heightAnchor.constraint(equalToConstant: 22)
         ])
 
-        rebuildExpandedLayoutIfNeeded(force: true)
+        rebuildExpandedLayoutIfNeeded()
     }
 
     private func makeCardHeader(symbolName: String, title: String) -> NSView {
@@ -1122,12 +1260,19 @@ public final class DynamicIslandContentView: NSView {
         let headerSpacer = NSView()
         headerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        netSpeedLabel.font = .monospacedDigitSystemFont(ofSize: 9.5, weight: .medium)
-        netSpeedLabel.textColor = NSColor.systemTeal.withAlphaComponent(0.95)
-        netSpeedLabel.lineBreakMode = .byTruncatingTail
-        netSpeedLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for (label, color, title) in [
+            (downloadSpeedLabel, NSColor.systemTeal, "下行网速"),
+            (uploadSpeedLabel, NSColor.systemBlue, "上行网速")
+        ] {
+            label.font = .monospacedDigitSystemFont(ofSize: 9.5, weight: .medium)
+            label.textColor = color
+            label.lineBreakMode = .byTruncatingTail
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            label.toolTip = title
+            label.setAccessibilityLabel(title)
+        }
 
-        let headerRow = NSStackView(views: [headerTitle, headerSpacer, netSpeedLabel])
+        let headerRow = NSStackView(views: [headerTitle, headerSpacer, downloadSpeedLabel, uploadSpeedLabel])
         headerRow.orientation = .horizontal
         headerRow.alignment = .centerY
         headerRow.spacing = 4
@@ -1305,6 +1450,114 @@ public final class DynamicIslandContentView: NSView {
         return card
     }
 
+    private func buildCalendarCard() -> IslandCardView {
+        let card = IslandCardView()
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.fittingSizeCompression, for: .horizontal)
+        let button = IslandChipButton(
+            title: "查看", fontSize: 10, horizontalPadding: 9, height: 16,
+            target: self, action: #selector(handleOpenCalendar(_:))
+        )
+        button.toolTip = "打开日历与日期倒计时"
+        button.setAccessibilityLabel("打开日历与日期倒计时")
+        let header = NSStackView(views: [makeCardHeader(symbolName: "calendar", title: "日历"), calendarDateLabel, spacer, button])
+        header.spacing = 5
+        header.orientation = .horizontal
+        header.alignment = .centerY
+
+        calendarDateLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold)
+        calendarDateLabel.textColor = .white
+        calendarEventLabel.font = .systemFont(ofSize: 10.5, weight: .medium)
+        calendarEventLabel.textColor = .systemTeal
+        calendarHolidayLabel.font = .systemFont(ofSize: 10.5, weight: .medium)
+        calendarHolidayLabel.textColor = .systemYellow
+        for label in [calendarDateLabel, calendarEventLabel, calendarHolidayLabel] {
+            label.lineBreakMode = .byTruncatingTail
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+
+        let stack = NSStackView(views: [header, calendarEventLabel, calendarHolidayLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 7),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -10),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: card.bottomAnchor, constant: -6),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            calendarEventLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            calendarHolidayLabel.widthAnchor.constraint(equalTo: stack.widthAnchor)
+        ])
+        return card
+    }
+
+    private func buildBookmarkCard() -> IslandCardView {
+        let card = IslandCardView()
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.fittingSizeCompression, for: .horizontal)
+        let manage = IslandChipButton(
+            title: "全部", fontSize: 10, horizontalPadding: 9, height: 16,
+            target: self, action: #selector(handleManageBookmarks(_:))
+        )
+        bookmarkManageButton = manage
+        let header = NSStackView(views: [makeCardHeader(symbolName: "bookmark", title: "网络书签"), spacer, manage])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 5
+
+        bookmarkEmptyLabel.font = .systemFont(ofSize: 10.5)
+        bookmarkEmptyLabel.textColor = NSColor(white: 0.68, alpha: 1)
+        bookmarkEmptyLabel.lineBreakMode = .byTruncatingTail
+        bookmarkEmptyLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        bookmarkLinks = (0..<2).map { index in
+            let link = IslandChipButton(
+                title: "", fontSize: 10, horizontalPadding: 10, height: 16,
+                target: self, action: #selector(handleOpenBookmark(_:))
+            )
+            link.tag = index
+            link.alignment = .left
+            link.cell?.lineBreakMode = .byTruncatingTail
+            link.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            return link
+        }
+
+        let stack = NSStackView(views: [header, bookmarkEmptyLabel] + bookmarkLinks)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 7),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -10),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: card.bottomAnchor, constant: -6),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            bookmarkEmptyLabel.widthAnchor.constraint(equalTo: stack.widthAnchor)
+        ])
+        for link in bookmarkLinks {
+            link.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor).isActive = true
+        }
+        return card
+    }
+
+    private func refreshBookmarkCard() {
+        bookmarkEmptyLabel.isHidden = !webBookmarks.isEmpty
+        for (index, link) in bookmarkLinks.enumerated() {
+            let bookmark = webBookmarks.indices.contains(index) ? webBookmarks[index] : nil
+            link.isHidden = bookmark == nil
+            link.title = bookmark?.title ?? ""
+            link.toolTip = bookmark?.url.absoluteString
+            link.setAccessibilityLabel(bookmark.map { "打开书签 \($0.title)" })
+        }
+        let manage = bookmarkManageButton
+        manage?.title = webBookmarks.isEmpty ? "添加" : "全部"
+        manage?.setAccessibilityLabel(webBookmarks.isEmpty ? "添加网络书签" : "查看全部网络书签")
+    }
+
     private func buildShelfCard() -> IslandCardView {
         let card = IslandCardView()
         let stack = NSStackView()
@@ -1420,76 +1673,109 @@ public final class DynamicIslandContentView: NSView {
 
     // MARK: - Dynamic Asymmetric Bento Adaptation
 
-    private func rebuildExpandedLayoutIfNeeded(force: Bool = false) {
+    private func rebuildExpandedLayoutIfNeeded() {
         guard let manager else { return }
-        let showSystemCard = manager.isFeatureEnabled(.systemMonitor) || manager.isFeatureEnabled(.networkSpeed)
-        let showAudioCard = manager.isFeatureEnabled(.audioControl) || manager.isFeatureEnabled(.keepAwake)
-        let showTimerCard = manager.isFeatureEnabled(.focusTimer)
-        let showShelfCard = manager.isFeatureEnabled(.fileShelf)
-        let showFooter = manager.isFeatureEnabled(.clipboardHistory)
-
-        let sig = "\(showSystemCard)-\(showAudioCard)-\(showTimerCard)-\(showShelfCard)-\(showFooter)"
-        guard force || sig != lastBentoSignature else { return }
-        lastBentoSignature = sig
-
-        for view in bentoHost.arrangedSubviews {
-            bentoHost.removeArrangedSubview(view)
-            view.removeFromSuperview()
+        let layout = manager.expandedLayout
+        let cards = manager.activeExpandedCards
+        let hideFooter = !manager.isFeatureEnabled(.clipboardHistory)
+        if footerRow.isHidden != hideFooter {
+            footerRow.isHidden = hideFooter
+            if hideFooter { dismissClipboardMenu() }
         }
+        if isEditingLayout { addCardButton.isHidden = hiddenCardsToAdd().isEmpty }
+        guard lastExpandedLayout != layout || lastExpandedCards != cards else { return }
+        lastExpandedLayout = layout
+        lastExpandedCards = cards
 
-        var leftCards: [NSView] = []
-        if showSystemCard { leftCards.append(systemCard) }
-        if showAudioCard { leftCards.append(audioCard) }
-        if showTimerCard { leftCards.append(timerCard) }
-
-        if showShelfCard && !leftCards.isEmpty {
-            bentoHost.isHidden = false
-            bentoHost.distribution = .fillEqually
-
-            let leftColumn = NSStackView()
-            leftColumn.orientation = .vertical
-            leftColumn.alignment = .leading
-            leftColumn.distribution = .fillEqually
-            leftColumn.spacing = 7
-            leftColumn.translatesAutoresizingMaskIntoConstraints = false
-
-            for card in leftCards {
-                card.translatesAutoresizingMaskIntoConstraints = false
-                leftColumn.addArrangedSubview(card)
-                card.widthAnchor.constraint(equalTo: leftColumn.widthAnchor).isActive = true
+        NSLayoutConstraint.deactivate(bentoConstraints)
+        bentoConstraints.removeAll()
+        for stack in [bentoHost] + bentoStacks {
+            for view in stack.arrangedSubviews {
+                stack.removeArrangedSubview(view)
+                view.removeFromSuperview()
             }
+        }
+        bentoStacks.removeAll()
 
-            shelfCard.translatesAutoresizingMaskIntoConstraints = false
-            bentoHost.addArrangedSubview(leftColumn)
-            bentoHost.addArrangedSubview(shelfCard)
+        bentoHost.isHidden = cards.isEmpty
+        updateLayoutEditingControls()
+        guard !cards.isEmpty else { return }
 
-            NSLayoutConstraint.activate([
-                leftColumn.heightAnchor.constraint(equalToConstant: 230),
-                shelfCard.heightAnchor.constraint(equalToConstant: 230)
-            ])
-        } else if showShelfCard && leftCards.isEmpty {
-            bentoHost.isHidden = false
+        let hasShelf = cards.contains(.shelf)
+        let compactCards = cards.filter { $0 != .shelf }
+        let metrics = IslandExpandedLayout.self
+        bentoHost.distribution = .fillEqually
+
+        if layout.usesGrid(cardCount: cards.count, hasShelf: hasShelf) {
+            bentoHost.orientation = .vertical
+            bentoHost.alignment = .leading
             bentoHost.distribution = .fill
-            shelfCard.translatesAutoresizingMaskIntoConstraints = false
-            bentoHost.addArrangedSubview(shelfCard)
-            NSLayoutConstraint.activate([
-                shelfCard.widthAnchor.constraint(equalTo: bentoHost.widthAnchor),
-                shelfCard.heightAnchor.constraint(equalToConstant: 230)
-            ])
-        } else if !leftCards.isEmpty {
-            bentoHost.isHidden = false
-            bentoHost.distribution = .fillEqually
-            for card in leftCards {
-                card.translatesAutoresizingMaskIntoConstraints = false
-                bentoHost.addArrangedSubview(card)
-                card.heightAnchor.constraint(equalToConstant: 106).isActive = true
+            for rowCards in layout.gridRows(for: cards) {
+                let row = makeBentoStack(orientation: .horizontal, alignment: .top, spacing: metrics.spacing)
+                bentoHost.addArrangedSubview(row)
+                bentoConstraints.append(row.widthAnchor.constraint(equalTo: bentoHost.widthAnchor))
+                for card in rowCards {
+                    addCard(card, to: row, height: card == .shelf ? metrics.shelfHeight : metrics.cardHeight)
+                }
+                let height = rowCards.contains(.shelf) ? metrics.shelfHeight : metrics.cardHeight
+                bentoConstraints.append(row.heightAnchor.constraint(equalToConstant: height))
             }
         } else {
-            bentoHost.isHidden = true
+            bentoHost.orientation = .horizontal
+            bentoHost.alignment = .top
+            if hasShelf && !compactCards.isEmpty {
+                let column = makeBentoStack(orientation: .vertical, alignment: .leading, spacing: metrics.compactSpacing)
+                let height = layout.bodySize(cardCount: cards.count, hasShelf: true).height
+                for card in compactCards {
+                    addCard(card, to: column)
+                }
+                bentoConstraints.append(column.heightAnchor.constraint(equalToConstant: height))
+                if layout == .shelfRight { bentoHost.addArrangedSubview(column) }
+                addCard(.shelf, to: bentoHost, height: height)
+                if layout == .shelfLeft { bentoHost.addArrangedSubview(column) }
+            } else {
+                for card in cards {
+                    addCard(card, to: bentoHost, height: card == .shelf ? metrics.shelfHeight : metrics.cardHeight)
+                }
+            }
         }
+        NSLayoutConstraint.activate(bentoConstraints)
+    }
 
-        footerRow.isHidden = !showFooter
-        if !showFooter { dismissClipboardMenu() }
+    private func makeBentoStack(
+        orientation: NSUserInterfaceLayoutOrientation, alignment: NSLayoutConstraint.Attribute, spacing: CGFloat
+    ) -> NSStackView {
+        let stack = NSStackView()
+        stack.orientation = orientation
+        stack.alignment = alignment
+        stack.distribution = .fillEqually
+        stack.spacing = spacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        bentoStacks.append(stack)
+        return stack
+    }
+
+    private func cardView(for card: IslandExpandedCard) -> IslandCardView {
+        switch card {
+        case .performance: return systemCard
+        case .audio: return audioCard
+        case .focus: return timerCard
+        case .shelf: return shelfCard
+        case .calendar: return calendarCard
+        case .bookmarks: return bookmarkCard
+        }
+    }
+
+    private func addCard(_ card: IslandExpandedCard, to stack: NSStackView, height: CGFloat? = nil) {
+        let view = cardView(for: card)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(view)
+        if stack.orientation == .vertical {
+            bentoConstraints.append(view.widthAnchor.constraint(equalTo: stack.widthAnchor))
+        }
+        if let height {
+            bentoConstraints.append(view.heightAnchor.constraint(equalToConstant: height))
+        }
     }
 
     // MARK: - Layout & Geometry
@@ -1619,7 +1905,10 @@ public final class DynamicIslandContentView: NSView {
 
     public func applyState(_ state: DynamicIslandState, animated: Bool = false) {
         rebuildExpandedLayoutIfNeeded()
-        if state != .expanded { dismissClipboardMenu() }
+        if state != .expanded {
+            dismissClipboardMenu()
+            setLayoutEditing(false)
+        }
 
         let activeView: NSView
         let previousState = displayedState
@@ -1679,7 +1968,16 @@ public final class DynamicIslandContentView: NSView {
         }
 
         let hasNotchGap = currentGeometry.notchReservedWidth > 0
-        let (leftText, rightText) = manager.collapsedDisplayContent(now: now, splitForNotch: hasNotchGap)
+        let leftText = manager.collapsedStatusText
+        let metric = manager.currentCollapsedMetric
+        let rightText = metric.map { manager.latestSnapshot.formatCollapsedMetric($0, now: now) }
+        if metric != displayedCollapsedMetric {
+            if displayedCollapsedMetric != nil, metric != nil, manager.state == .collapsed,
+               collapsedMetricLabel.window?.isVisible == true {
+                ToolAppearance.reveal(collapsedMetricLabel, from: 0.35, duration: 0.18)
+            }
+            displayedCollapsedMetric = metric
+        }
 
         if let leftText {
             collapsedTitleLabel.stringValue = leftText
@@ -1715,9 +2013,11 @@ public final class DynamicIslandContentView: NSView {
         let snap = manager.latestSnapshot
         let now = Date()
         updateCollapsedBarContent(now: now)
+        updateCalendarCard(events: manager.calendarEvents, now: now)
 
         // Expanded header
-        expandedClockLabel.stringValue = Self.fullTimeFormatter.string(from: now)
+        expandedClockLabel.stringValue = manager.expandedNotice?.title ?? Self.fullTimeFormatter.string(from: now)
+        expandedClockLabel.toolTip = manager.expandedNotice?.detail
         if let battery = snap.batteryPercent {
             let symbol = snap.isCharging ? "battery.100.bolt" : (battery > 60 ? "battery.75" : (battery > 25 ? "battery.50" : "battery.25"))
             expandedBatteryIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "电量")
@@ -1736,10 +2036,10 @@ public final class DynamicIslandContentView: NSView {
 
         // System & Network card
         let showSys = manager.isFeatureEnabled(.systemMonitor)
-        let showNet = manager.isFeatureEnabled(.networkSpeed)
         cpuGroup.isHidden = !showSys
         memGroup.isHidden = !showSys
-        netSpeedLabel.isHidden = !showNet
+        downloadSpeedLabel.isHidden = !manager.isFeatureEnabled(.downloadSpeed)
+        uploadSpeedLabel.isHidden = !manager.isFeatureEnabled(.uploadSpeed)
 
         cpuValueLabel.stringValue = "\(snap.cpuPercentInt)%"
         cpuBar.progress = snap.cpuUsage
@@ -1753,7 +2053,8 @@ public final class DynamicIslandContentView: NSView {
 
         memValueLabel.stringValue = "\(snap.memoryPercentInt)%"
         memBar.progress = snap.memoryUsage
-        netSpeedLabel.stringValue = "↓\(SystemSnapshot.formatSpeed(snap.downloadBytesPerSec)) ↑\(SystemSnapshot.formatSpeed(snap.uploadBytesPerSec))"
+        downloadSpeedLabel.stringValue = "↓ \(SystemSnapshot.formatSpeed(snap.downloadBytesPerSec))"
+        uploadSpeedLabel.stringValue = "↑ \(SystemSnapshot.formatSpeed(snap.uploadBytesPerSec))"
 
         // Audio & Keep-Awake card
         let showAudio = manager.isFeatureEnabled(.audioControl)
@@ -1810,11 +2111,13 @@ public final class DynamicIslandContentView: NSView {
 
     public override func updateTrackingAreas() {
         super.updateTrackingAreas()
+        let rect = currentGeometry.interactionRect(for: effectivePillRect())
         if let trackingArea {
+            guard trackingArea.rect != rect else { return }
             removeTrackingArea(trackingArea)
         }
         let area = NSTrackingArea(
-            rect: currentGeometry.pillRect,
+            rect: rect,
             options: [.mouseEnteredAndExited, .activeAlways],
             owner: self,
             userInfo: nil
@@ -1823,7 +2126,18 @@ public final class DynamicIslandContentView: NSView {
         trackingArea = area
     }
 
+    fileprivate var blocksAutomaticCollapse: Bool {
+        isEditingLayout || clipboardMenu != nil || containsPointer
+    }
+
+    private var containsPointer: Bool {
+        guard let window, window.isVisible else { return false }
+        let mouseInWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        return currentGeometry.interactionRect(for: effectivePillRect()).contains(convert(mouseInWindow, from: nil))
+    }
+
     public override func mouseEntered(with event: NSEvent) {
+        guard containsPointer else { return }
         hoverOutWorkItem?.cancel()
         hoverOutWorkItem = nil
 
@@ -1836,9 +2150,7 @@ public final class DynamicIslandContentView: NSView {
             hoverInWorkItem = nil
             guard let manager = self.manager, manager.isEnabled, manager.hoverToExpand,
                   manager.state != .expanded, NSEvent.pressedMouseButtons == 0,
-                  let window, window.isVisible else { return }
-            let mouseInWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
-            guard currentGeometry.pillRect.contains(convert(mouseInWindow, from: nil)) else { return }
+                  containsPointer else { return }
             manager.expand()
         }
         hoverInWorkItem = item
@@ -1863,10 +2175,9 @@ public final class DynamicIslandContentView: NSView {
         }
         hoverOutWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
-            guard let self, let manager = self.manager else { return }
-            guard self.clipboardMenu == nil, manager.state == .expanded,
-                  !manager.isExternalFileDragActive, !manager.isInternalDragInProgress else { return }
-            manager.collapse(force: false)
+            guard let self else { return }
+            hoverOutWorkItem = nil
+            self.manager?.collapse(force: false)
         }
         hoverOutWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: item)
@@ -1874,7 +2185,7 @@ public final class DynamicIslandContentView: NSView {
 
     public override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard currentGeometry.pillRect.insetBy(dx: -currentGeometry.earRadius, dy: 0).contains(point) else {
+        guard currentGeometry.interactionRect(for: effectivePillRect()).contains(point) else {
             return
         }
         if let manager, manager.state != .expanded {
@@ -1884,37 +2195,187 @@ public final class DynamicIslandContentView: NSView {
         super.mouseDown(with: event)
     }
 
-    // MARK: - Drag & Drop Shelf
+    // MARK: - Panel Layout Editing
+
+    public func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldAttemptToRecognizeWith event: NSEvent) -> Bool {
+        guard !isEditingLayout, manager?.state == .expanded, let view = gestureRecognizer.view else { return false }
+        let point = view.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow
+        var hit = view.hitTest(point)
+        while let current = hit, current !== view {
+            if current is NSControl || current is ShelfGridCellView { return false }
+            hit = current.superview
+        }
+        return true
+    }
+
+    @objc private func handleLayoutPress(_ sender: NSPressGestureRecognizer) {
+        if sender.state == .began { setLayoutEditing(true) }
+    }
+
+    @objc private func toggleLayoutEditing() { setLayoutEditing(!isEditingLayout) }
+
+    private func setLayoutEditing(_ enabled: Bool) {
+        guard enabled != isEditingLayout else { return }
+        isEditingLayout = enabled
+        cardDropTarget = nil
+        updateLayoutEditingControls()
+        if !enabled && !containsPointer { scheduleHoverCollapse() }
+    }
+
+    private func updateLayoutEditingControls() {
+        let title = isEditingLayout ? "完成编辑" : "编辑组件"
+        editLayoutButton.setAccessibilityLabel(title)
+        editLayoutButton.toolTip = title
+        editLayoutButton.setSymbol(isEditingLayout ? "checkmark" : "pencil")
+        let available = hiddenCardsToAdd()
+        addCardButton.isHidden = !isEditingLayout || available.isEmpty
+        guard isEditingLayout else {
+            for editor in cardEditors.values { editor.removeFromSuperview() }
+            cardEditors.removeAll()
+            return
+        }
+        for card in IslandExpandedCard.allCases where cardEditors[card] == nil {
+            let view = cardView(for: card)
+            let editor = IslandCardEditOverlay(card: card)
+            editor.onRemove = { [weak self] in self?.manager?.setExpandedCardHidden(card, hidden: true) }
+            view.addSubview(editor)
+            NSLayoutConstraint.activate([
+                editor.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                editor.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                editor.topAnchor.constraint(equalTo: view.topAnchor),
+                editor.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            ])
+            cardEditors[card] = editor
+        }
+    }
+
+    private func hiddenCardsToAdd() -> [IslandExpandedCard] {
+        guard let manager else { return [] }
+        return IslandExpandedCard.allCases.filter { manager.hiddenExpandedCards.contains($0) && manager.isExpandedCardEnabled($0) }
+    }
+
+    @objc private func showHiddenCards(_ sender: NSButton) {
+        let menu = NSMenu(title: "添加组件")
+        for card in hiddenCardsToAdd() {
+            let item = NSMenuItem(title: card.title, action: #selector(restoreCard(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = card.rawValue
+            menu.addItem(item)
+        }
+        let bottom = sender.isFlipped ? sender.bounds.maxY : sender.bounds.minY
+        menu.popUp(positioning: nil, at: NSPoint(x: sender.bounds.minX, y: bottom), in: sender)
+    }
+
+    @objc private func restoreCard(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String, let card = IslandExpandedCard(rawValue: name) else { return }
+        manager?.setExpandedCardHidden(card, hidden: false)
+    }
+
+    private func layoutDropTarget(for sender: NSDraggingInfo) -> IslandExpandedCard? {
+        guard isEditingLayout, let source = sender.draggingSource as? IslandCardEditOverlay,
+              cardEditors[source.card] === source else { return nil }
+        let point = convert(sender.draggingLocation, from: nil)
+        return manager?.activeExpandedCards.first { card in
+            let view = cardView(for: card)
+            return card != source.card && view.convert(view.bounds, to: self).insetBy(dx: -3, dy: -3).contains(point)
+        }
+    }
+
+    // MARK: - Drag & Drop
 
     public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard manager?.isFeatureEnabled(.fileShelf) == true,
+        if sender.draggingSource is IslandCardEditOverlay { return draggingUpdated(sender) }
+        guard !isEditingLayout, manager?.isFileShelfVisible == true,
               sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else {
             return []
         }
         setExternalDropHighlight(true)
-        if manager?.state != .expanded {
-            manager?.expand()
-        }
+        if manager?.state != .expanded { manager?.expand() }
         return .copy
     }
 
+    public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if sender.draggingSource is IslandCardEditOverlay {
+            cardDropTarget = layoutDropTarget(for: sender)
+            return cardDropTarget == nil ? [] : .move
+        }
+        return isDragHighlighted && !isEditingLayout ? .copy : []
+    }
+
     public override func draggingExited(_ sender: NSDraggingInfo?) {
+        cardDropTarget = nil
         setExternalDropHighlight(manager?.isExternalFileDragActive == true)
     }
 
     public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if let source = sender.draggingSource as? IslandCardEditOverlay {
+            defer { cardDropTarget = nil }
+            guard let target = layoutDropTarget(for: sender) else { return false }
+            manager?.moveExpandedCard(source.card, onto: target)
+            return true
+        }
         setExternalDropHighlight(false)
-        guard manager?.isFeatureEnabled(.fileShelf) == true else { return false }
+        guard !isEditingLayout, manager?.isFileShelfVisible == true else { return false }
         let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
         guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL],
-              !urls.isEmpty else {
-            return false
-        }
+              !urls.isEmpty else { return false }
         manager?.addDroppedFiles(urls)
         return true
     }
 
+    private func updateCalendarCard(events: [CalendarCountdownEvent], now: Date) {
+        let calendar = CalendarCountdown.localCalendar
+        calendarCountdown?.refresh(now: now, calendar: calendar)
+        guard manager?.activeExpandedCards.contains(.calendar) == true else { return }
+        let today = CountdownDay(date: now, calendar: calendar)
+        let holidays = ChinaHolidayCalendar.shared
+        holidays.refresh(around: today.year, now: now)
+        let revision = holidays.revision
+        guard calendarDisplayDay != today || displayedCalendarEvents != events || calendarHolidayRevision != revision else { return }
+        calendarDisplayDay = today
+        displayedCalendarEvents = events
+        calendarHolidayRevision = revision
+        calendarDateLabel.stringValue = now.formatted(
+            Date.FormatStyle(date: .omitted, time: .omitted, calendar: calendar, timeZone: calendar.timeZone)
+                .month().day().weekday(.abbreviated)
+        )
+        if let nextHoliday = HolidayCountdown.upcoming(in: Array(holidays.daysByDate.values), now: now, calendar: calendar).first {
+            calendarHolidayLabel.stringValue = "\(nextHoliday.holiday.name) · \(CalendarCountdown.status(for: nextHoliday.days))"
+            calendarHolidayLabel.toolTip = calendarHolidayLabel.stringValue
+        } else {
+            calendarHolidayLabel.stringValue = "暂无已同步的近期节假日"
+            calendarHolidayLabel.toolTip = nil
+        }
+
+        if let next = CalendarCountdown.orderedEvents(events, now: now, calendar: calendar).first {
+            calendarEventLabel.stringValue = "\(next.event.title) · \(CalendarCountdown.status(for: next.days))"
+            calendarEventLabel.toolTip = calendarEventLabel.stringValue
+        } else {
+            calendarEventLabel.stringValue = "选择日期或添加事件"
+            calendarEventLabel.toolTip = nil
+        }
+    }
+
     // MARK: - Button Actions
+
+    @objc private func handleManageBookmarks(_ sender: NSButton) {
+        webBookmarksWindow.show(from: sender)
+    }
+
+    @objc private func handleOpenBookmark(_ sender: NSButton) {
+        guard webBookmarks.indices.contains(sender.tag) else { return }
+        if !webBookmarksWindow.openBookmark(webBookmarks[sender.tag]) {
+            manager?.showHUD(title: "无法打开书签", detail: webBookmarks[sender.tag].title, symbolName: "bookmark")
+        }
+    }
+
+    @objc private func handleOpenCalendar(_ sender: NSButton) {
+        guard let manager else { return }
+        if calendarCountdown == nil {
+            calendarCountdown = CalendarCountdownWindowController(manager: manager)
+        }
+        calendarCountdown?.show(from: sender)
+    }
 
     @objc private func handleOpenPasswordBook(_ sender: NSButton) { passwordBook.show(from: sender) }
     @objc private func handlePinTapped(_ sender: Any?) { manager?.togglePin() }
@@ -1937,7 +2398,7 @@ public final class DynamicIslandContentView: NSView {
     }
 
     @objc private func handleShowClipboardHistory(_ sender: NSButton) {
-        guard let manager, let window = sender.window,
+        guard let manager, sender.window != nil,
               manager.isFeatureEnabled(.clipboardHistory), clipboardMenu == nil else { return }
 
         let menu = NSMenu(title: "剪贴板历史")
@@ -1969,10 +2430,7 @@ public final class DynamicIslandContentView: NSView {
         menu.popUp(positioning: nil, at: NSPoint(x: sender.bounds.minX, y: lowerEdge), in: sender)
         clipboardMenu = nil
 
-        let mouseInWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
-        if !currentGeometry.pillRect.contains(convert(mouseInWindow, from: nil)) {
-            scheduleHoverCollapse()
-        }
+        if !containsPointer { scheduleHoverCollapse() }
     }
 
     @objc private func handleCopyHistoryEntry(_ sender: NSMenuItem) {
@@ -1999,6 +2457,8 @@ public final class DynamicIslandWindowController {
     private let contentView: DynamicIslandContentView
 
     public var currentPanelFrame: NSRect { panel.frame }
+
+    var blocksAutomaticCollapse: Bool { contentView.blocksAutomaticCollapse }
 
     public var currentCollapsedPillWidth: CGFloat {
         contentView.currentGeometry.pillSize.width
@@ -2109,9 +2569,10 @@ public final class DynamicIslandWindowController {
             style: manager.style,
             state: manager.state,
             expandedCardCount: manager.activeExpandedCardCount,
-            hasFileShelf: manager.isFeatureEnabled(.fileShelf),
+            hasFileShelf: manager.isFileShelfVisible,
             showFooter: manager.isFeatureEnabled(.clipboardHistory),
-            collapsedDesiredWidth: desiredCollapsedWidth
+            collapsedDesiredWidth: desiredCollapsedWidth,
+            expandedLayout: manager.expandedLayout
         )
     }
 }

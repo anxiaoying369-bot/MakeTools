@@ -19,9 +19,16 @@ struct DynamicIslandTests {
         testNonNotchGeometry()
         testHUDSafeArea()
         testAdaptiveExpandedGeometry()
+        testCustomExpandedLayout()
+        testExpandedInteractionRect()
+        testCalendarCountdown()
+        testWebBookmarks()
+        testHolidayDataAndLunarCalendar()
         testFileDragGesture()
         testSpeedFormattingAndFeatures()
         testCollapsedCustomizationAndShelfPreview()
+        testCollapsedMetricRotation()
+        testNetworkSpeedPreferences()
         testFocusTimerModel()
         testSystemMetricsReaderBounds()
 
@@ -29,6 +36,86 @@ struct DynamicIslandTests {
         if failedAssertions > 0 {
             exit(1)
         }
+    }
+
+    private static func testCollapsedMetricRotation() {
+        let rotation = CollapsedMetricRotation(startedAt: 100)
+        let metrics: [CollapsedMetricItem] = [.cpu, .memory, .clock]
+        check(rotation.current(in: [], uptime: 104) == nil, "No enabled metrics should leave the metric slot empty")
+        check(rotation.current(in: [.clock], uptime: 159) == .clock, "A single selected metric should stay visible")
+        check(rotation.current(in: metrics, uptime: 102.99) == .cpu, "First metric should remain until three seconds")
+        check(rotation.current(in: metrics, uptime: 103) == .memory, "Second metric should appear after three seconds")
+        check(rotation.current(in: metrics, uptime: 106) == .clock, "Third metric should appear after six seconds")
+        check(rotation.current(in: metrics, uptime: 109) == .cpu, "The carousel should wrap to the first metric")
+        check(rotation.current(in: metrics, uptime: 121) == .memory, "A delayed update should catch up without changing cadence")
+    }
+
+    private static func testWebBookmarks() {
+        let home = WebBookmark(title: "  ", address: " example.com/docs ")
+        check(home?.title == "example.com" && home?.url.absoluteString == "https://example.com/docs",
+              "A bare address should use HTTPS and take its title from the hostname")
+        check(WebBookmark(title: "local", address: "localhost:8080")?.url.port == 8080,
+              "A bare host and port should still be accepted")
+        check(WebBookmark(title: "redirect", address: "example.com/?to=https://example.org") != nil,
+              "An embedded URL should not be mistaken for the bookmark's scheme")
+        check(WebBookmark(title: "", address: "file:///tmp/example") == nil
+              && WebBookmark(title: "", address: "javascript:alert(1)") == nil
+              && WebBookmark(title: "", address: "https://user:secret@example.com") == nil
+              && WebBookmark(title: "", address: "https://") == nil,
+              "Only valid web addresses without embedded credentials should be saved")
+
+        let suite = "MakeTools.WebBookmarkTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WebBookmarkStore(defaults: defaults)
+        guard let home,
+              let second = WebBookmark(title: "Other", address: "http://example.org"),
+              let updated = WebBookmark(title: "Docs", address: home.url.absoluteString) else {
+            check(false, "Could not prepare bookmark fixture")
+            return
+        }
+        do {
+            let empty = try store.load()
+            _ = try store.add(home)
+            _ = try store.add(second)
+            let bookmarks = try store.add(updated)
+            let reloaded = try WebBookmarkStore(defaults: defaults).load()
+            check(empty.isEmpty, "A new profile should have no bookmarks")
+            check(bookmarks == [updated, second] && reloaded == bookmarks,
+                  "Bookmarks should persist, newest first, without duplicating the same URL")
+            let remaining = try store.remove(url: updated.url)
+            let persisted = try store.load()
+            check(remaining == [second] && persisted == remaining, "Deleting one bookmark should persist and retain other entries")
+            let unchanged = try store.remove(url: updated.url)
+            check(unchanged == remaining, "Deleting an already removed bookmark should be safe")
+            let removedLast = try store.remove(url: second.url)
+            let persistedEmpty = try store.load()
+            check(removedLast.isEmpty && persistedEmpty.isEmpty, "Deleting the last bookmark should persist an empty list")
+        } catch {
+            check(false, "Bookmark persistence failed: \(error)")
+        }
+    }
+
+    private static func testNetworkSpeedPreferences() {
+        check(CollapsedMetricItem.restoredSelection(from: ["clock", "networkSpeed"]) == [.clock, .downloadSpeed, .uploadSpeed],
+              "A previously enabled network metric should become two selected directions")
+        check(CollapsedMetricItem.restoredSelection(from: ["downloadSpeed"]) == [.downloadSpeed],
+              "A new single-direction selection should remain independent")
+        check(CollapsedMetricItem.restoredSelection(from: []) == [], "An empty selection should remain empty")
+
+        let suite = "MakeTools.NetworkPreferenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let prefix = "feature."
+        defaults.set(false, forKey: prefix + "networkSpeed")
+        check(!DynamicIslandFeature.downloadSpeed.initialEnabled(in: defaults, keyPrefix: prefix),
+              "A disabled legacy network switch should keep downloads hidden")
+        check(!DynamicIslandFeature.uploadSpeed.initialEnabled(in: defaults, keyPrefix: prefix),
+              "A disabled legacy network switch should keep uploads hidden")
+        defaults.set(true, forKey: prefix + "downloadSpeed")
+        check(DynamicIslandFeature.downloadSpeed.initialEnabled(in: defaults, keyPrefix: prefix)
+              && !DynamicIslandFeature.uploadSpeed.initialEnabled(in: defaults, keyPrefix: prefix),
+              "A newly changed download switch should not re-enable uploads")
     }
 
     private static func testFileDragGesture() {
@@ -137,6 +224,144 @@ struct DynamicIslandTests {
         check(noNotch.pillSize.height == IslandGeometry.hudRowHeight, "The HUD remains compact without a notch")
     }
 
+    private static func testCustomExpandedLayout() {
+        let screen = NSRect(x: 0, y: 0, width: 1512, height: 982)
+        let order = IslandExpandedCard.restoredOrder(from: ["shelf", "shelf", "unknown", "focus"])
+        check(order == [.shelf, .focus, .performance, .audio, .calendar, .bookmarks],
+              "Saved layouts should keep unique cards and append new cards")
+        check(IslandExpandedCard.restoredOrder(from: []) == IslandExpandedCard.allCases,
+              "An existing installation should keep the default order")
+        check(IslandExpandedLayout.grid.gridRows(for: order) == [[.shelf, .focus], [.performance, .audio], [.calendar, .bookmarks]],
+              "Grid fills rows from left to right according to the saved order")
+        check(IslandExpandedLayout.grid.gridRows(for: [.audio, .shelf, .focus]) == [[.audio, .shelf], [.focus]],
+              "A grid with an odd number of active cards should include a final single-card row")
+
+        let left = IslandGeometry.compute(screenFrame: screen, safeAreaTop: 0, notchWidth: nil,
+                                          style: .auto, state: .expanded, expandedLayout: .shelfLeft)
+        let right = IslandGeometry.compute(screenFrame: screen, safeAreaTop: 0, notchWidth: nil,
+                                           style: .auto, state: .expanded, expandedLayout: .shelfRight)
+        check(left.pillSize == right.pillSize, "Moving the shelf between sides should preserve the panel size")
+
+        let grid = IslandGeometry.compute(screenFrame: screen, safeAreaTop: 0, notchWidth: nil,
+                                          style: .auto, state: .expanded, expandedLayout: .grid)
+        check(grid.pillSize == NSSize(width: 512, height: 430), "The grid should fit a shelf row and a compact row")
+
+        let gridWithoutShelf = IslandGeometry.compute(
+            screenFrame: screen, safeAreaTop: 0, notchWidth: nil, style: .auto, state: .expanded,
+            expandedCardCount: 3, hasFileShelf: false, showFooter: false, expandedLayout: .grid
+        )
+        check(gridWithoutShelf.pillSize.height == 276, "The grid should fit two compact rows when the shelf is off")
+    }
+
+    private static func testCalendarCountdown() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+
+        func date(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -> Date {
+            calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour))!
+        }
+
+        let now = date(2024, 3, 10, hour: 23)
+        let tomorrow = CountdownDay(date: date(2024, 3, 11), calendar: calendar)
+        let yesterday = CountdownDay(date: date(2024, 3, 9), calendar: calendar)
+        let today = CountdownDay(date: now, calendar: calendar)
+        check(tomorrow.days(from: now, calendar: calendar) == 1, "Countdown should cross midnight on a DST day")
+        check(yesterday.days(from: now, calendar: calendar) == -1, "Elapsed days should count calendar dates across DST")
+        check(today.days(from: date(2024, 3, 10, hour: 0), calendar: calendar) == 0, "Different times today should count as zero")
+        check(CountdownDay(date: date(2024, 3, 1), calendar: calendar).days(from: date(2024, 2, 28), calendar: calendar) == 2,
+              "Countdown should include the leap day")
+        check(CalendarCountdown.status(for: -3) == "已过去 3 天", "Past dates should show elapsed days")
+        check(CalendarCountdown.status(for: 2) == "还有 2 天", "Future dates should show remaining days")
+        check(CalendarCountdown.status(for: 0) == "就是今天", "Today should have a dedicated status")
+
+        let events = [
+            CalendarCountdownEvent(id: UUID(), title: "Past", day: yesterday),
+            CalendarCountdownEvent(id: UUID(), title: "Tomorrow", day: tomorrow),
+            CalendarCountdownEvent(id: UUID(), title: "Today", day: today)
+        ]
+        check(CalendarCountdown.orderedEvents(events, now: now, calendar: calendar).map(\.event.title) == ["Today", "Tomorrow", "Past"],
+              "Upcoming events should appear first, then elapsed events")
+
+        let suite = "MakeTools.CalendarCountdownTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = CalendarCountdownStore(defaults: defaults)
+        check(store.load().isEmpty, "A fresh calendar should have no user events")
+        do {
+            try store.save(events)
+            check(store.load() == events, "The calendar should persist local dates, titles, and event identities")
+        } catch {
+            check(false, "Calendar event persistence failed: \(error)")
+        }
+
+        let bento = IslandExpandedLayout.shelfRight.bodySize(cardCount: 5, hasShelf: true)
+        check(bento.height == 309, "A fourth compact card should enlarge both bento columns")
+        check(IslandExpandedLayout.shelfRight.usesGrid(cardCount: 4, hasShelf: false),
+              "Four compact cards should wrap into two columns when the shelf is disabled")
+    }
+
+    private static func testHolidayDataAndLunarCalendar() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let lunar = CalendarCountdown.lunarCalendar(timeZone: calendar.timeZone)
+        let today = CountdownDay(isoDate: "2026-10-01")!
+        let now = today.date(in: calendar)!
+        let grid = CalendarCountdown.monthGrid(containing: now, calendar: calendar)
+        check(grid.count == 42, "Calendar should show six complete weeks")
+        check(calendar.component(.weekday, from: grid[0]) == 2, "Calendar should begin on a Monday")
+        check(CountdownDay(isoDate: "2026-02-29") == nil, "Holiday decoder should reject nonexistent days")
+        let newYear = CountdownDay(isoDate: "2026-02-17")!.date(in: calendar)!
+        check(CalendarCountdown.lunarLabel(for: newYear, calendar: lunar, includingMonth: true) == "正月初一",
+              "Lunar conversion should show the Chinese New Year date")
+        let leapMonth = CountdownDay(isoDate: "2025-07-25")!.date(in: calendar)!
+        check(CalendarCountdown.lunarLabel(for: leapMonth, calendar: lunar) == "闰六月",
+              "The month grid should distinguish a lunar leap month")
+        let months2025 = CalendarCountdown.lunarYearStartingIn(2025, gregorian: calendar)
+        check(months2025.count == 13 && months2025.contains { calendar.isDate($0, inSameDayAs: leapMonth) },
+              "The lunar editor should enumerate the leap month separately")
+        let months2026 = CalendarCountdown.lunarYearStartingIn(2026, gregorian: calendar)
+        check(months2026.count == 12 && months2026.first.map { calendar.isDate($0, inSameDayAs: newYear) } == true,
+              "The lunar editor should start with the correct new year")
+
+
+        let json = """
+        {"year":2026,"days":[{"name":"国庆节","date":"2026-10-01","isOffDay":true},
+        {"name":"国庆节","date":"2026-10-02","isOffDay":true},
+        {"name":"国庆节","date":"2026-10-10","isOffDay":false},
+        {"name":"元旦","date":"2027-01-01","isOffDay":true}]}
+        """
+        let year = try! JSONDecoder().decode(ChinaHolidayYear.self, from: Data(json.utf8))
+        check(year.validatedDays(for: 2025) == nil, "A holiday dataset cannot be saved under a different year")
+        let days = year.validatedDays(for: 2026) ?? []
+        check(days.count == 4 && days.contains { !$0.isOffDay }, "The data should preserve makeup workdays and cross-year dates")
+        let countdown = HolidayCountdown.upcoming(in: days, now: now, calendar: calendar)
+        check(countdown.map(\.holiday.name) == ["国庆节", "元旦"] && countdown.first?.days == 0,
+              "Holiday countdown should group the break and ignore makeup workdays")
+        check(IslandExpandedCard.moving(.calendar, onto: .audio, in: IslandExpandedCard.allCases)
+                == [.performance, .calendar, .audio, .focus, .shelf, .bookmarks],
+              "Dragging a card earlier should preserve the relative order of other cards")
+        check(IslandExpandedCard.moving(.performance, onto: .focus, in: [.performance, .audio, .focus, .calendar])
+                == [.audio, .focus, .performance, .calendar],
+              "Dragging a card later should put it in the target position")
+    }
+
+    private static func testExpandedInteractionRect() {
+        let geometry = IslandGeometry.compute(
+            screenFrame: NSRect(x: 0, y: 0, width: 1512, height: 982),
+            safeAreaTop: 37, notchWidth: 180, style: .notch, state: .expanded
+        )
+        let duringResize = NSRect(x: 26, y: 22, width: 420, height: 244)
+        let interactionRect = geometry.interactionRect(for: duringResize)
+        check(interactionRect.contains(NSPoint(x: duringResize.midX, y: duringResize.midY)),
+              "The pointer in the card area should be treated as inside the panel")
+        check(interactionRect.contains(NSPoint(x: duringResize.minX - 5, y: duringResize.maxY - 1)),
+              "The pointer on the notch shoulder should be treated as inside the panel")
+        check(!interactionRect.contains(NSPoint(x: duringResize.midX, y: duringResize.minY - 1)),
+              "The pointer below the panel should be treated as outside")
+        check(!interactionRect.contains(NSPoint(x: duringResize.midX, y: duringResize.maxY + 1)),
+              "Tracking should follow the visible panel during a resize")
+    }
+
     private static func testAdaptiveExpandedGeometry() {
         let screen = NSRect(x: 0, y: 0, width: 1920, height: 1080)
 
@@ -198,7 +423,7 @@ struct DynamicIslandTests {
         check(SystemSnapshot.formatSpeed(15 * 1024) == "15 KB/s", "KB speed should format cleanly")
         check(SystemSnapshot.formatSpeed(2.5 * 1024 * 1024) == "2.5 MB/s", "MB speed should format with 1 decimal")
 
-        check(DynamicIslandFeature.allCases.count == 8, "Should expose all 8 modular Dynamic Island features")
+        check(DynamicIslandFeature.allCases.contains(.calendarCountdown), "Should expose the calendar module")
         for feature in DynamicIslandFeature.allCases {
             check(!feature.title.isEmpty, "\(feature.rawValue) title should not be empty")
             check(!feature.subtitle.isEmpty, "\(feature.rawValue) subtitle should not be empty")
@@ -208,7 +433,7 @@ struct DynamicIslandTests {
     }
 
     private static func testCollapsedCustomizationAndShelfPreview() {
-        check(CollapsedMetricItem.allCases.count == 6, "Should expose 6 collapsed metric items")
+        check(CollapsedMetricItem.allCases.count == 7, "Should expose each network direction separately")
         check(SystemSnapshot.formatCompactSpeed(0) == "0B", "0 compact speed")
         check(SystemSnapshot.formatCompactSpeed(15 * 1024) == "15K", "KB compact speed")
         check(SystemSnapshot.formatCompactSpeed(2.4 * 1024 * 1024) == "2.4M", "MB compact speed")
@@ -227,7 +452,8 @@ struct DynamicIslandTests {
         )
         check(snap.formatCollapsedMetric(.cpu) == "CPU 23%", "CPU collapsed format")
         check(snap.formatCollapsedMetric(.memory) == "内存 50%", "Memory collapsed format")
-        check(snap.formatCollapsedMetric(.networkSpeed) == "↓12K ↑2K", "Network collapsed format")
+        check(snap.formatCollapsedMetric(.downloadSpeed) == "↓12K", "Download collapsed format")
+        check(snap.formatCollapsedMetric(.uploadSpeed) == "↑2K", "Upload collapsed format")
         check(snap.formatCollapsedMetric(.battery) == "⚡84%", "Charging battery collapsed format")
         check(snap.formatCollapsedMetric(.volume) == "音量 45%", "Volume collapsed format")
 
