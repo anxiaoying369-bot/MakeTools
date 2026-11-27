@@ -43,15 +43,7 @@ dmg: build
 	@chmod +x scripts/package-dmg.sh scripts/render-dmg-bg.swift
 	@./scripts/package-dmg.sh
 
-package: build dmg
-	@set -eu; \
-		version=$$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$(ROOT_DIR)/build/MakeTools.app/Contents/Info.plist"); \
-		archive="MakeTools-v$$version-macos-$(ARCH).zip"; \
-		staging=$$(/usr/bin/mktemp -d "$(ROOT_DIR)/build/package.XXXXXX"); \
-		trap 'rm -rf "$$staging"' EXIT; \
-		/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$(ROOT_DIR)/build/MakeTools.app" "$$staging/$$archive"; \
-		mv -f "$$staging/$$archive" "$(ROOT_DIR)/build/$$archive"; \
-		printf '==> Package: %s\n' "$(ROOT_DIR)/build/$$archive"
+package: dmg
 
 install: build
 	@./scripts/install.sh
