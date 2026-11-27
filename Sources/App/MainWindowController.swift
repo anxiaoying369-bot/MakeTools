@@ -60,10 +60,6 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         }
     }
 
-    public func openInstallationGuide() {
-        selectTool(withID: "installation-guide")
-    }
-
     // MARK: - UI Setup
 
     private func setupUI() {
@@ -196,16 +192,8 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         let nextVC: NSViewController
         if let cached = cachedControllers[tool.id] {
             nextVC = cached
-            if let installVC = cached as? InstallationViewController {
-                installVC.refreshSnapshot()
-            }
         } else {
             let created = tool.makeViewController()
-            if let installVC = created as? InstallationViewController {
-                installVC.onNavigateToTool = { [weak self] toolID in
-                    self?.selectTool(withID: toolID)
-                }
-            }
             cachedControllers[tool.id] = created
             nextVC = created
         }
@@ -240,9 +228,7 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
     }
 
     @objc private func openExtensionSettings(_ sender: Any?) {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.ExtensionsPreferences") {
-            NSWorkspace.shared.open(url)
-        }
+        InstallationService.shared.openExtensionsSettings()
     }
 
     // MARK: - NSTableViewDataSource & Delegate

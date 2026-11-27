@@ -605,7 +605,7 @@ public struct RegistrationOutcome: Equatable {
     public let warning: String?
 }
 
-/// Coordinates environment inspection, in-app installation, Quick Look registration, and Login Item management.
+/// Registers and verifies the embedded Quick Look extension.
 public final class InstallationService {
     public static let shared = InstallationService()
 
@@ -619,83 +619,15 @@ public final class InstallationService {
         Bundle.main.bundleURL
     }
 
-    public func currentRunningVersion() -> AppVersion {
-        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1.0"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-        return AppVersion(shortVersion: short, buildNumber: build)
-    }
-
-    public func makeSnapshot(dynamicIslandEnabled: Bool) -> InstallationSnapshot {
-        let runningURL = currentRunningAppURL()
-        let runningVersion = currentRunningVersion()
-        let installStatus = InstallationInspector.classifyInstallStatus(
-            runningAppURL: runningURL,
-            runningVersion: runningVersion
-        )
-        let targetAppURL = installStatus.installedAppURL ?? runningURL
-        let targetVersion = InstallationInspector.readBundleVersion(at: targetAppURL) ?? runningVersion
-        let embeddedExt = InstallationInspector.readEmbeddedQuickLookExtension(in: targetAppURL)
-        let registeredURLs = NSWorkspace.shared.urlsForApplications(
-            withBundleIdentifier: InstallationInspector.appBundleIdentifier
-        )
-        let registeredRecently = preferences.isQuickLookRegistered(for: targetAppURL, version: targetVersion)
-
-        let quickLook = QuickLookCheckResult(
-            targetAppURL: targetAppURL,
-            embeddedExtension: embeddedExt,
-            registeredAppURLs: registeredURLs,
-            lastRegisteredAt: preferences.lastRegisteredAt,
-            registeredForCurrentTarget: registeredRecently
-        )
-
-        return InstallationSnapshot(
-            runningAppURL: runningURL,
-            runningVersion: runningVersion,
-            osVersion: InstallationInspector.currentOSVersionString(),
-            architecture: InstallationInspector.currentArchitectureLabel(),
-            installStatus: installStatus,
-            legacyAppURL: InstallationInspector.detectLegacyApp(),
-            quickLook: quickLook,
-            loginItemState: currentLoginItemState(),
-            dynamicIslandEnabled: dynamicIslandEnabled
-        )
-    }
-
-    public func currentLoginItemState() -> LoginItemState {
-        switch SMAppService.mainApp.status {
-        case .enabled:
-            return .enabled
-        case .requiresApproval:
-            return .requiresApproval
-        case .notRegistered:
-            return .notRegistered
-        case .notFound:
-            return .notFound
-        @unknown default:
-            return .notRegistered
-        }
-    }
-
-    public func setLoginItemEnabled(_ enabled: Bool) throws -> LoginItemState {
-        if enabled {
-            try SMAppService.mainApp.register()
-        } else {
-            try SMAppService.mainApp.unregister()
-        }
-        return currentLoginItemState()
-    }
-
-    public func openLoginItemsSettings() {
-        SMAppService.openSystemSettingsLoginItems()
-    }
-
     public func openExtensionsSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.ExtensionsPreferences") {
+        if #available(macOS 15, *) {
+            SMAppService.openSystemSettingsLoginItems()
+        } else if let url = URL(string: "x-apple.systempreferences:com.apple.ExtensionsPreferences") {
             NSWorkspace.shared.open(url)
         }
     }
 
-    /// Runs `lsregister`, `pluginkit -a`, and `qlmanage -r` / `-r cache` on a background queue.
+    /// Checks the actual PlugInKit state and registers the extension if needed.
     public func registerQuickLookExtension(
         for appURL: URL,
         completion: @escaping (RegistrationOutcome) -> Void
@@ -708,119 +640,43 @@ public final class InstallationService {
         }
     }
 
-    /// Performs the full install flow (copy into authorized folder + cleanup legacy app + register extension).
-    public func installApp(
-        into destinationDirectoryURL: URL,
-        progress: @escaping (String) -> Void,
-        completion: @escaping (Result<(AppBundleCopyOutcome, RegistrationOutcome), Error>) -> Void
-    ) {
-        let sourceURL = currentRunningAppURL()
-        DispatchQueue.global(qos: .userInitiated).async { [preferences] in
-            let didStart = destinationDirectoryURL.startAccessingSecurityScopedResource()
-            defer {
-                if didStart {
-                    destinationDirectoryURL.stopAccessingSecurityScopedResource()
-                }
-            }
-
-            do {
-                DispatchQueue.main.async { progress("正在将 MakeTools.app 复制到目标文件夹…") }
-                let copyOutcome = try AppBundleInstaller.install(
-                    sourceAppURL: sourceURL,
-                    into: destinationDirectoryURL
-                )
-
-                let legacyExtPath = destinationDirectoryURL
-                    .appendingPathComponent(InstallationInspector.legacyAppBundleName)
-                    .appendingPathComponent("Contents/PlugIns/MarkdownPreviewExtension.appex").path
-                if FileManager.default.fileExists(atPath: legacyExtPath) {
-                    _ = Self.runCommand("/usr/bin/pluginkit", arguments: ["-r", legacyExtPath])
-                }
-                _ = AppBundleInstaller.removeLegacyAppIfPresent(in: destinationDirectoryURL)
-
-                DispatchQueue.main.async { progress("正在注册应用与 Quick Look 扩展…") }
-                let regOutcome = Self.performQuickLookRegistration(
-                    for: copyOutcome.destinationURL,
-                    preferences: preferences
-                )
-
-                DispatchQueue.main.async {
-                    completion(.success((copyOutcome, regOutcome)))
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    completion(.failure(error))
-                }
-            }
-        }
-    }
-
-    public func relaunchApp(at appURL: URL, completion: @escaping (Error?) -> Void) {
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.createsNewApplicationInstance = true
-        configuration.activates = true
-        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
-            DispatchQueue.main.async {
-                if let error {
-                    completion(error)
-                } else {
-                    completion(nil)
-                    NSApp.terminate(nil)
-                }
-            }
-        }
-    }
-
     private static func performQuickLookRegistration(
         for appURL: URL,
         preferences: InstallationPreferences
     ) -> RegistrationOutcome {
-        var steps: [String] = []
-        var warnings: [String] = []
-
-        let ls = runCommand(InstallationInspector.lsregisterPath, arguments: ["-f", "-R", appURL.path])
-        if ls.exitCode == 0 {
-            steps.append("已向 LaunchServices 注册应用包")
-        } else {
-            warnings.append("LaunchServices 注册返回状态 \(ls.exitCode)")
-        }
-
         let extURL = appURL
             .appendingPathComponent("Contents/PlugIns", isDirectory: true)
             .appendingPathComponent(InstallationInspector.quickLookExtensionName, isDirectory: true)
-        var pluginAdded = false
-        if FileManager.default.fileExists(atPath: extURL.path) {
-            let pk = runCommand("/usr/bin/pluginkit", arguments: ["-a", extURL.path])
-            if pk.exitCode == 0 {
-                pluginAdded = true
-                steps.append("已向 PlugInKit 提交 Quick Look 扩展")
-            } else {
-                let errDetail = pk.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                warnings.append("pluginkit 注册失败\(errDetail.isEmpty ? "" : "：\(errDetail)")")
+            .standardizedFileURL.resolvingSymlinksInPath()
+        guard FileManager.default.fileExists(atPath: extURL.path) else {
+            return RegistrationOutcome(succeeded: false, steps: [], warning: "应用包内未找到 Markdown 快速预览扩展")
+        }
+
+        let pluginKit = "/usr/bin/pluginkit"
+        let match = ["-p", "com.apple.quicklook.preview", "-i", InstallationInspector.quickLookExtensionIdentifier]
+        func isEnabled() -> Bool {
+            let result = runCommand(pluginKit, arguments: ["-m", "-v"] + match)
+            return result.exitCode == 0 && result.stdout.split(whereSeparator: { $0.isNewline }).contains { line in
+                guard line.first == "+", let path = line.split(separator: "\t").last else { return false }
+                return URL(fileURLWithPath: String(path)).standardizedFileURL.resolvingSymlinksInPath().path == extURL.path
             }
-        } else {
-            warnings.append("应用包内未找到 \(InstallationInspector.quickLookExtensionName)")
         }
 
-        let qlReset = runCommand("/usr/bin/qlmanage", arguments: ["-r"])
-        let qlCache = runCommand("/usr/bin/qlmanage", arguments: ["-r", "cache"])
-        if qlReset.exitCode == 0 && qlCache.exitCode == 0 {
-            steps.append("已刷新 Quick Look 服务与预览缓存")
-        } else {
-            warnings.append("刷新 Quick Look 缓存时出现警告")
+        if isEnabled() {
+            return RegistrationOutcome(succeeded: true, steps: [], warning: nil)
         }
 
-        let succeeded = pluginAdded && warnings.isEmpty
-        if pluginAdded {
-            let version = InstallationInspector.readBundleVersion(at: appURL) ?? AppVersion(shortVersion: "1.1.0")
-            preferences.recordQuickLookRegistration(appURL: appURL, version: version)
+        _ = runCommand(InstallationInspector.lsregisterPath, arguments: ["-f", "-R", appURL.path])
+        _ = runCommand(pluginKit, arguments: ["-a", extURL.path])
+        _ = runCommand(pluginKit, arguments: ["-e", "use"] + match)
+        guard isEnabled() else {
+            return RegistrationOutcome(succeeded: false, steps: [], warning: "系统未启用当前应用的 Markdown 快速预览扩展")
         }
 
-        return RegistrationOutcome(
-            succeeded: succeeded,
-            steps: steps,
-            warning: warnings.isEmpty ? nil : warnings.joined(separator: "；")
-        )
+        _ = runCommand("/usr/bin/qlmanage", arguments: ["-r"])
+        let version = InstallationInspector.readBundleVersion(at: appURL) ?? AppVersion(shortVersion: "1.1.0")
+        preferences.recordQuickLookRegistration(appURL: appURL, version: version)
+        return RegistrationOutcome(succeeded: true, steps: ["已启用 Markdown 快速预览扩展"], warning: nil)
     }
 
     private struct CommandResult {

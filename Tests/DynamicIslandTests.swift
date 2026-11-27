@@ -22,6 +22,7 @@ struct DynamicIslandTests {
         testCustomExpandedLayout()
         testExpandedInteractionRect()
         testCalendarCountdown()
+        testSystemCalendarDates()
         testWebBookmarks()
         testHolidayDataAndLunarCalendar()
         testFileDragGesture()
@@ -298,6 +299,43 @@ struct DynamicIslandTests {
         check(bento.height == 309, "A fourth compact card should enlarge both bento columns")
         check(IslandExpandedLayout.shelfRight.usesGrid(cardCount: 4, hasShelf: false),
               "Four compact cards should wrap into two columns when the shelf is disabled")
+    }
+
+    private static func testSystemCalendarDates() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        func day(_ number: Int) -> DateInterval {
+            let date = calendar.date(from: DateComponents(year: 2024, month: 3, day: number))!
+            return calendar.dateInterval(of: .day, for: date)!
+        }
+
+        let allDay = SystemCalendarEvent(title: "Conference", calendarName: "Work",
+                                         start: day(9).start, end: day(10).end, isAllDay: true)
+        check(allDay.occurs(in: day(9)) && allDay.occurs(in: day(10)),
+              "Multi-day events should appear on each day, including a DST transition")
+        check(!allDay.occurs(in: day(8)) && !allDay.occurs(in: day(11)),
+              "An event ending at midnight should not appear on the following day")
+        let point = SystemCalendarEvent(title: "Milestone", calendarName: "Work",
+                                        start: day(10).start, end: day(10).start, isAllDay: false)
+        check(point.occurs(in: day(10)), "A zero-duration event should appear on its start date")
+
+        let dateOnly = SystemCalendarReminder(title: "All day", listName: "Inbox",
+                                              dueComponents: DateComponents(timeZone: .gmt, year: 2024, month: 3, day: 10),
+                                              calendar: calendar)
+        check(dateOnly.due.map { day(10).contains($0) } == true && !dateOnly.hasDueTime,
+              "A date-only reminder should keep its civil date when viewed in another time zone")
+        let timed = SystemCalendarReminder(title: "Timed", listName: "Inbox",
+                                           dueComponents: DateComponents(timeZone: .gmt, year: 2024, month: 3, day: 11, hour: 1),
+                                           calendar: calendar)
+        check(timed.due.map { day(10).contains($0) } == true && timed.hasDueTime,
+              "A timed reminder should use its designated time zone")
+        let floating = SystemCalendarReminder(title: "Floating", listName: "Inbox",
+                                              dueComponents: DateComponents(year: 2024, month: 3, day: 11, hour: 1),
+                                              calendar: calendar)
+        check(floating.due.map { day(11).contains($0) } == true && floating.hasDueTime,
+              "A floating timed reminder should use the local time zone")
+        let undated = SystemCalendarReminder(title: "Someday", listName: "Inbox", dueComponents: nil, calendar: calendar)
+        check(undated.due == nil && !undated.hasDueTime, "An undated reminder should not be assigned a day")
     }
 
     private static func testHolidayDataAndLunarCalendar() {

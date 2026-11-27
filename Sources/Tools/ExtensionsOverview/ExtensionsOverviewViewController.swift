@@ -158,8 +158,6 @@ public final class ExtensionsOverviewViewController: NSViewController {
     }
 
     @objc private func openSystemExtensions(_ sender: Any?) {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.ExtensionsPreferences") {
-            NSWorkspace.shared.open(url)
-        }
+        InstallationService.shared.openExtensionsSettings()
     }
 }

@@ -21,9 +21,10 @@ test:
 		-o $(TEST_BIN)
 	@$(TEST_BIN)
 	@swiftc -target $(TARGET) -sdk "$(SDK_PATH)" -parse-as-library \
-		-framework AppKit -framework Foundation -framework UniformTypeIdentifiers -framework IOKit -framework CoreAudio -framework AudioToolbox \
+		-framework AppKit -framework Foundation -framework UniformTypeIdentifiers -framework IOKit -framework CoreAudio -framework AudioToolbox -framework EventKit \
 		Sources/Tools/DynamicIsland/DynamicIslandMetrics.swift \
 		Sources/Tools/Calendar/CalendarCountdown.swift \
+		Sources/Tools/Calendar/SystemCalendarStore.swift \
 		Sources/Tools/Calendar/ChinaHolidayCalendar.swift \
 		Sources/Tools/WebBookmarks/WebBookmarkStore.swift \
 		Tests/DynamicIslandTests.swift \

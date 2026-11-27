@@ -15,8 +15,7 @@ public enum ToolRegistry {
         [
             MarkdownPreviewTool(),
             DynamicIslandTool(),
-            ExtensionsOverviewTool(),
-            InstallationTool()
+            ExtensionsOverviewTool()
         ]
     }
 }

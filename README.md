@@ -22,10 +22,18 @@ MakeTools 是一个用 Swift 和 AppKit 编写的 macOS 效率工具集。你可
 | 文件暂存架 | 拖入文件，最多暂存 9 项。展开后可打开、拖出，或通过系统分享菜单发送。 |
 | 防休眠 | 在演示或需要保持屏幕亮起时开启。 |
 | 剪贴板历史 | 点击「剪贴板 ▾」查看最近 8 条文本记录，点选即可按原格式重新复制。 |
-| 日历与日期倒计时 | 在月历里选一天，查看还有多少天或已过去多少天。可保存多个公历或农历事件。月历会标记中国大陆放假和调休补班，日历卡片会显示最近的事件和假期倒计时。 |
+| 日历与日期倒计时 | 在月历里选一天，查看还有多少天或已过去多少天。可保存多个公历或农历事件。月历会标记中国大陆放假和调休补班，日历卡片会显示最近的事件和假期倒计时。也可[同步系统日程和待办](#同步系统日历和提醒事项)。 |
 | 网络书签 | 从灵动岛打开书签面板，输入网址即可收藏。点击书签卡片可用默认浏览器打开，点击右侧垃圾桶可删除。 |
 
 MakeTools 在前台时，可以按 <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>D</kbd> 展开或收起灵动岛。关闭主窗口后，应用会留在菜单栏，可从菜单栏重新打开窗口或退出。
+
+### 同步系统日历和提醒事项
+
+1. 展开灵动岛，打开日历卡片并切换到「系统日历」。
+2. 分别点击「允许访问日历」和「允许访问提醒事项」，按 macOS 提示授权。两项权限可独立开启；如先前拒绝，可通过应用中的按钮前往「系统设置 → 隐私与安全性」修改权限。
+3. 在月历中选中日期，查看当天的日程和未完成待办。蓝点代表有日程，橙点代表有待办。没有日期的待办会单独列出。
+
+系统日程和待办发生变化后，列表会自动刷新。系统数据在 MakeTools 中以只读方式显示，编辑日程或完成待办请在 macOS「日历」或「提醒事项」中操作。
 
 ### 密码本
 
@@ -36,14 +44,14 @@ MakeTools 在前台时，可以按 <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>D</kbd> �
 ### Markdown 预览与 Quick Look
 
 - 在应用的「Markdown 预览」页面打开文件，或直接查看内置演示。
-- 安装 Quick Look 扩展后，在访达中选中 `.md`、`.markdown` 等 Markdown 文件并按空格预览。
+- 启动 MakeTools 后，在访达中选中 `.md`、`.markdown` 等 Markdown 文件并按空格预览。
 - 支持表格、任务清单、嵌套列表、代码高亮、GitHub 提示块和 YAML Front Matter。可以复制 Markdown 原文、纯文本或单个代码块。
 
 两个入口共用 Swift Markdown 解析器。应用内预览通过 WebKit 显示，Quick Look 扩展使用 AppKit 原生视图。可以用 [示例 Markdown](Samples/demo.md) 体验。
 
 ## 下载
 
-从 [GitHub Releases](https://github.com/anxiaoying369-bot/MakeTools/releases) 下载 DMG 安装包。Apple 芯片选 `arm64`，Intel 芯片选 `x86_64`。打开 DMG 后按安装界面指引将 `MakeTools.app` 拖入「应用程序」文件夹即可；若从其他目录直接启动，应用内置「安装与引导」页面也会引导拖拽安装到「应用程序」、注册访达 Quick Look 扩展并配置开机自启。发布包使用 Ad-hoc 签名，未经 Apple 公证。
+从 [GitHub Releases](https://github.com/anxiaoying369-bot/MakeTools/releases) 下载 DMG 安装包。Apple 芯片选 `arm64`，Intel 芯片选 `x86_64`。打开 DMG 后按安装界面指引将 `MakeTools.app` 拖入「应用程序」文件夹即可。打开 MakeTools 时会自动设置访达的 Markdown 快速预览，设置失败时会在应用内提示如何手动启用。发布包使用 Ad-hoc 签名，未经 Apple 公证。
 
 ## 从源码运行
 
@@ -55,9 +63,11 @@ make run
 
 `make run` 会构建并打开 `build/MakeTools.app`。只需要应用包时，运行 `make build`。构建脚本按本机架构编译，并对应用及扩展执行 Ad-hoc 签名。
 
-### 安装 Quick Look 扩展
+### 使用 Quick Look 扩展
 
-关闭正在运行的 MakeTools 后，在项目根目录执行以下命令。
+启动 MakeTools 后，在访达中选中 `Samples/demo.md` 并按空格。也可以运行 `make preview-demo`。
+
+如果希望用命令行安装应用及扩展，关闭正在运行的 MakeTools 后，在项目根目录执行以下命令。
 
 ```sh
 make install
@@ -66,7 +76,7 @@ open /Applications/MakeTools.app
 
 安装脚本会替换 `/Applications/MakeTools.app`、注册内置扩展并刷新 Quick Look 缓存。它也会清理旧版独立应用 `/Applications/MarkdownQuickLook.app`。
 
-安装后，在访达中选中 `Samples/demo.md` 并按空格。也可以运行 `make preview-demo`。如果仍显示系统默认预览，可从主窗口的「系统扩展」页打开系统扩展设置，并用下面的命令确认 MakeTools 扩展的注册状态。
+如果仍显示系统默认预览，可从主窗口的「系统扩展」页打开系统扩展设置，并用下面的命令确认 MakeTools 扩展的注册状态。
 
 ```sh
 pluginkit -m -v -p com.apple.quicklook.preview | grep -i MakeTools
@@ -84,7 +94,7 @@ pluginkit -m -v -p com.apple.quicklook.preview | grep -i MakeTools
 make test
 ```
 
-测试覆盖 Markdown 渲染，以及灵动岛的布局、拖放判断和部分系统指标逻辑。
+测试覆盖 Markdown 渲染、Quick Look 安装辅助逻辑、灵动岛布局、拖放、系统指标，以及日历的跨天日程与待办时区处理。
 
 如果使用 Xcode，可以通过 [XcodeGen](https://github.com/yonaskolb/XcodeGen) 读取 [project.yml](project.yml) 并生成工程。
 
@@ -97,9 +107,9 @@ open MakeTools.xcodeproj
 | --- | --- |
 | [Sources/App](Sources/App) | 应用入口、主窗口和菜单栏行为。 |
 | [Sources/Core](Sources/Core) | 工具注册、剪贴板和共用界面组件。 |
-| [Sources/Tools](Sources/Tools) | 灵动岛、密码本、Markdown 预览、系统扩展概览和安装与引导页。 |
+| [Sources/Tools](Sources/Tools) | 灵动岛、密码本、Markdown 预览、系统扩展概览。 |
 | [Sources/Extensions/MarkdownQuickLook](Sources/Extensions/MarkdownQuickLook) | 访达 Quick Look 扩展。 |
-| [Tests](Tests) | Markdown 和灵动岛测试。 |
+| [Tests](Tests) | Markdown、灵动岛、日历和安装辅助逻辑的测试。 |
 | [Assets](Assets) | 应用图标源图和打包所用的 ICNS。 |
 
 添加侧栏工具时，实现 [ToolModule](Sources/Core/ToolModule.swift)，并在 `ToolRegistry.defaultTools()` 中注册。新增 Swift 源文件时，请一并更新 [命令行构建脚本](scripts/build.sh) 中的编译清单。

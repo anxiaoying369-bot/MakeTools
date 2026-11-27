@@ -60,6 +60,7 @@ swiftc \
     -framework ImageIO \
     -framework Security \
     -framework ServiceManagement \
+    -framework EventKit \
     -framework QuickLookUI \
     -framework QuickLookThumbnailing \
     "${ROOT_DIR}/Sources/Core/ClipboardHelper.swift" \
@@ -77,6 +78,7 @@ swiftc \
     "${ROOT_DIR}/Sources/Tools/PasswordBook/PasswordBookStore.swift" \
     "${ROOT_DIR}/Sources/Tools/PasswordBook/PasswordBookWindowController.swift" \
     "${ROOT_DIR}/Sources/Tools/Calendar/CalendarCountdown.swift" \
+    "${ROOT_DIR}/Sources/Tools/Calendar/SystemCalendarStore.swift" \
     "${ROOT_DIR}/Sources/Tools/Calendar/CalendarMonthGrid.swift" \
     "${ROOT_DIR}/Sources/Tools/Calendar/ChinaHolidayCalendar.swift" \
     "${ROOT_DIR}/Sources/Tools/Calendar/CalendarCountdownWindowController.swift" \
@@ -84,7 +86,6 @@ swiftc \
     "${ROOT_DIR}/Sources/Tools/WebBookmarks/WebBookmarksWindowController.swift" \
     "${ROOT_DIR}/Sources/Tools/ExtensionsOverview/ExtensionsOverviewViewController.swift" \
     "${ROOT_DIR}/Sources/Tools/Installation/InstallationSupport.swift" \
-    "${ROOT_DIR}/Sources/Tools/Installation/InstallationViewController.swift" \
     "${ROOT_DIR}/Sources/App/MainWindowController.swift" \
     "${ROOT_DIR}/Sources/App/AppDelegate.swift" \
     "${ROOT_DIR}/Sources/App/main.swift" \
