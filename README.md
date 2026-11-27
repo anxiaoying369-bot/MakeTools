@@ -43,7 +43,7 @@ MakeTools 在前台时，可以按 <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>D</kbd> �
 
 ## 下载
 
-从 [GitHub Releases](https://github.com/anxiaoying369-bot/MakeTools/releases) 下载 ZIP。Apple 芯片选 `arm64`，Intel 芯片选 `x86_64`。解压后可将 `MakeTools.app` 移到「应用程序」。发布包使用 Ad-hoc 签名，未经 Apple 公证。
+从 [GitHub Releases](https://github.com/anxiaoying369-bot/MakeTools/releases) 下载 DMG（推荐）或 ZIP。Apple 芯片选 `arm64`，Intel 芯片选 `x86_64`。打开 DMG 后按安装界面指引将 `MakeTools.app` 拖入「应用程序」文件夹即可；若从其他目录直接启动，应用内置「安装与引导」页面也会引导拖拽安装到「应用程序」、注册访达 Quick Look 扩展并配置开机自启。发布包使用 Ad-hoc 签名，未经 Apple 公证。
 
 ## 从源码运行
 
@@ -74,9 +74,9 @@ pluginkit -m -v -p com.apple.quicklook.preview | grep -i MakeTools
 
 ## 打包
 
-在项目根目录运行 `make package`，可生成当前架构的 `build/MakeTools-v<版本>-macos-<架构>.zip`。ZIP 包含应用和内置 Quick Look 扩展。
+在项目根目录运行 `make package`，可生成当前架构的图形化安装包 `build/MakeTools-v<版本>-macos-<架构>.dmg` 与压缩包 `build/MakeTools-v<版本>-macos-<架构>.zip`（单独生成 DMG 可运行 `make dmg`）。DMG 打开后提供「将 MakeTools 拖入应用程序」的图形安装界面，应用内含 Quick Look 扩展。
 
-[打包工作流](.github/workflows/package.yml) 在 Apple 芯片和 Intel 的 macOS runner 上分别测试和打包。推送与应用版本一致的 `v*` 标签后，工作流会把两个 ZIP 和 SHA-256 校验文件上传到 GitHub Release。
+[打包工作流](.github/workflows/package.yml) 在 Apple 芯片和 Intel 的 macOS runner 上分别测试和打包。推送与应用版本一致的 `v*` 标签后，工作流会把两个架构的 DMG、ZIP 和 SHA-256 校验文件上传到 GitHub Release。
 
 ## 开发与贡献
 
@@ -97,7 +97,7 @@ open MakeTools.xcodeproj
 | --- | --- |
 | [Sources/App](Sources/App) | 应用入口、主窗口和菜单栏行为。 |
 | [Sources/Core](Sources/Core) | 工具注册、剪贴板和共用界面组件。 |
-| [Sources/Tools](Sources/Tools) | 灵动岛、密码本、Markdown 预览和系统扩展概览。 |
+| [Sources/Tools](Sources/Tools) | 灵动岛、密码本、Markdown 预览、系统扩展概览和安装与引导页。 |
 | [Sources/Extensions/MarkdownQuickLook](Sources/Extensions/MarkdownQuickLook) | 访达 Quick Look 扩展。 |
 | [Tests](Tests) | Markdown 和灵动岛测试。 |
 | [Assets](Assets) | 应用图标源图和打包所用的 ICNS。 |

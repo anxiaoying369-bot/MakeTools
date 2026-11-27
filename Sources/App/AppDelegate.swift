@@ -6,7 +6,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
-        let controller = MainWindowController(tools: ToolRegistry.defaultTools())
+        let installService = InstallationService.shared
+        let runningVersion = installService.currentRunningVersion()
+        let installStatus = InstallationInspector.classifyInstallStatus(
+            runningAppURL: installService.currentRunningAppURL(),
+            runningVersion: runningVersion
+        )
+        let initialToolID = installService.preferences.shouldOpenOnLaunch(
+            installStatus: installStatus,
+            runningVersion: runningVersion
+        ) ? "installation-guide" : nil
+
+        let controller = MainWindowController(
+            tools: ToolRegistry.defaultTools(),
+            initialToolID: initialToolID
+        )
         controller.onWindowShouldClose = { [weak self] window in
             self?.hideMainWindowToBackground(window)
             return false
@@ -82,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let menu = NSMenu()
         menu.addItem(withTitle: "打开 MakeTools 主窗口", action: #selector(openMainWindowFromMenu(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "安装与引导…", action: #selector(openInstallationGuide(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "显示 / 隐藏灵动岛", action: #selector(toggleDynamicIslandEnabled(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "展开 / 收起灵动岛", action: #selector(toggleDynamicIslandExpand(_:)), keyEquivalent: "")
@@ -102,6 +117,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainWindowController?.openMarkdownPicker()
     }
 
+    @objc private func openInstallationGuide(_ sender: Any?) {
+        showMainWindow()
+        mainWindowController?.openInstallationGuide()
+    }
+
     @objc private func toggleDynamicIslandEnabled(_ sender: Any?) {
         DynamicIslandManager.shared.setEnabled(!DynamicIslandManager.shared.isEnabled)
     }
@@ -116,6 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "关于 MakeTools", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "安装与引导…", action: #selector(openInstallationGuide(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "退出 MakeTools", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu

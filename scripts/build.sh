@@ -59,6 +59,8 @@ swiftc \
     -framework AudioToolbox \
     -framework ImageIO \
     -framework Security \
+    -framework ServiceManagement \
+    -framework QuickLookUI \
     -framework QuickLookThumbnailing \
     "${ROOT_DIR}/Sources/Core/ClipboardHelper.swift" \
     "${ROOT_DIR}/Sources/Core/ToolAppearance.swift" \
@@ -81,6 +83,8 @@ swiftc \
     "${ROOT_DIR}/Sources/Tools/WebBookmarks/WebBookmarkStore.swift" \
     "${ROOT_DIR}/Sources/Tools/WebBookmarks/WebBookmarksWindowController.swift" \
     "${ROOT_DIR}/Sources/Tools/ExtensionsOverview/ExtensionsOverviewViewController.swift" \
+    "${ROOT_DIR}/Sources/Tools/Installation/InstallationSupport.swift" \
+    "${ROOT_DIR}/Sources/Tools/Installation/InstallationViewController.swift" \
     "${ROOT_DIR}/Sources/App/MainWindowController.swift" \
     "${ROOT_DIR}/Sources/App/AppDelegate.swift" \
     "${ROOT_DIR}/Sources/App/main.swift" \

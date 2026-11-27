@@ -10,7 +10,7 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
 
     public var onWindowShouldClose: ((NSWindow) -> Bool)?
 
-    public init(tools: [ToolModule]) {
+    public init(tools: [ToolModule], initialToolID: String? = nil) {
         self.tools = tools
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1060, height: 720),
@@ -28,7 +28,11 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         super.init(window: window)
         window.delegate = self
         setupUI()
-        selectTool(at: 0)
+        if let initialToolID, tools.contains(where: { $0.id == initialToolID }) {
+            selectTool(withID: initialToolID)
+        } else {
+            selectTool(at: 0)
+        }
     }
 
     @available(*, unavailable)
@@ -54,6 +58,10 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         if let vc = cachedControllers["markdown-preview"] as? MarkdownToolViewController {
             vc.loadMarkdownFile(at: url)
         }
+    }
+
+    public func openInstallationGuide() {
+        selectTool(withID: "installation-guide")
     }
 
     // MARK: - UI Setup
@@ -172,7 +180,7 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
 
     // MARK: - Tool Selection
 
-    private func selectTool(withID id: String) {
+    public func selectTool(withID id: String) {
         if let index = tools.firstIndex(where: { $0.id == id }) {
             selectTool(at: index)
         }
@@ -188,8 +196,16 @@ public final class MainWindowController: NSWindowController, NSTableViewDataSour
         let nextVC: NSViewController
         if let cached = cachedControllers[tool.id] {
             nextVC = cached
+            if let installVC = cached as? InstallationViewController {
+                installVC.refreshSnapshot()
+            }
         } else {
             let created = tool.makeViewController()
+            if let installVC = created as? InstallationViewController {
+                installVC.onNavigateToTool = { [weak self] toolID in
+                    self?.selectTool(withID: toolID)
+                }
+            }
             cachedControllers[tool.id] = created
             nextVC = created
         }
