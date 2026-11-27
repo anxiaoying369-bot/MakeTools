@@ -74,12 +74,13 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
     init(store: WebBookmarkStore = WebBookmarkStore(), openURL: @escaping (URL) -> Bool = NSWorkspace.shared.open) {
         self.store = store
         self.openURL = openURL
-        let size = NSSize(width: 510, height: 398)
+        let size = NSSize(width: 550, height: 462)
         let panel = WebBookmarksPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .nonactivatingPanel], backing: .buffered, defer: false
         )
-        panel.title = "网络书签"
+        panel.backgroundColor = ToolAppearance.canvas
+        panel.title = L10n.text("island.webBookmarks", "网络书签")
         panel.contentMinSize = size
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
@@ -99,7 +100,7 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
             do {
                 updateList(try store.load())
             } catch {
-                status.stringValue = "无法读取已保存的书签。"
+                status.stringValue = L10n.text("bookmarks.couldNotReadSavedBookmarks", "无法读取已保存的书签。")
             }
             if let screen = parent.screen {
                 let visible = screen.visibleFrame.insetBy(dx: 10, dy: 10)
@@ -121,15 +122,15 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
         guard let window, let root = window.contentView else { return }
 
         addressField.placeholderString = "example.com"
-        addressField.setAccessibilityLabel("书签网址")
-        titleField.placeholderString = "使用网站域名"
-        titleField.setAccessibilityLabel("书签名称")
-        let address = fieldGroup("网址", field: addressField)
-        let title = fieldGroup("名称（可选）", field: titleField)
+        addressField.setAccessibilityLabel(L10n.text("bookmarks.bookmarkUrl", "书签网址"))
+        titleField.placeholderString = L10n.text("bookmarks.useWebsiteDomain", "使用网站域名")
+        titleField.setAccessibilityLabel(L10n.text("bookmarks.bookmarkName", "书签名称"))
+        let address = fieldGroup(L10n.text("bookmarks.url", "网址"), field: addressField)
+        let title = fieldGroup(L10n.text("bookmarks.nameOptional", "名称（可选）"), field: titleField)
         title.widthAnchor.constraint(equalToConstant: 126).isActive = true
         addressField.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
 
-        let add = NSButton(title: "添加书签", target: self, action: #selector(addBookmark))
+        let add = NSButton(title: L10n.text("bookmarks.addBookmark", "添加书签"), target: self, action: #selector(addBookmark))
         ToolAppearance.configure(add, symbol: "plus")
         add.keyEquivalent = "\r"
         add.controlSize = .large
@@ -140,22 +141,11 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
         form.alignment = .bottom
         form.distribution = .fill
         form.spacing = 10
-        let composerFill = NSColor(name: nil) { appearance in
-            let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            return .controlAccentColor.withAlphaComponent(dark ? 0.09 : 0.045)
-        }
-        let composer = ToolSurfaceView(fill: composerFill, radius: 14)
-        composer.addSubview(form)
-        form.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            form.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 14),
-            form.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -14),
-            form.topAnchor.constraint(equalTo: composer.topAnchor, constant: 12),
-            form.bottomAnchor.constraint(equalTo: composer.bottomAnchor, constant: -12)
-        ])
+        let composer = ToolAppearance.section(form, fill: ToolAppearance.tint, inset: 14)
+        let headingBand = ToolAppearance.sectionTitle(L10n.text("island.webBookmarks", "网络书签"), symbol: "bookmark.fill")
         window.initialFirstResponder = addressField
 
-        let heading = NSTextField(labelWithString: "已保存的书签")
+        let heading = NSTextField(labelWithString: L10n.text("bookmarks.savedBookmarks", "已保存的书签"))
         heading.font = .systemFont(ofSize: 13, weight: .semibold)
         countLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         countLabel.textColor = .secondaryLabelColor
@@ -182,7 +172,7 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
         table.selectionHighlightStyle = .none
         table.dataSource = self
         table.delegate = self
-        table.setAccessibilityLabel("已保存的网络书签")
+        table.setAccessibilityLabel(L10n.text("bookmarks.savedWebBookmarks", "已保存的网络书签"))
 
         scroll.borderType = .noBorder
         scroll.drawsBackground = false
@@ -190,9 +180,9 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
         scroll.autohidesScrollers = true
         scroll.documentView = table
 
-        let emptyTitle = NSTextField(labelWithString: "暂无书签")
+        let emptyTitle = NSTextField(labelWithString: L10n.text("bookmarks.noBookmarks", "暂无书签"))
         emptyTitle.font = .systemFont(ofSize: 13, weight: .semibold)
-        let emptyHint = NSTextField(labelWithString: "在上方输入网址，收藏常用网页。")
+        let emptyHint = NSTextField(labelWithString: L10n.text("bookmarks.enterAUrlAboveToSaveA", "在上方输入网址，收藏常用网页。"))
         emptyHint.font = .systemFont(ofSize: 11)
         emptyHint.textColor = .secondaryLabelColor
         emptyState.orientation = .vertical
@@ -202,12 +192,14 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
             emptyState.addArrangedSubview(view)
         }
 
-        for view in [composer, listHeader, scroll, emptyState] {
+        for view in [headingBand, composer, listHeader, scroll, emptyState] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
         NSLayoutConstraint.activate([
-            composer.topAnchor.constraint(equalTo: root.topAnchor, constant: 18),
+            headingBand.topAnchor.constraint(equalTo: root.topAnchor, constant: 17),
+            headingBand.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
+            composer.topAnchor.constraint(equalTo: headingBand.bottomAnchor, constant: 12),
             composer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
             composer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
             listHeader.topAnchor.constraint(equalTo: composer.bottomAnchor, constant: 18),
@@ -242,7 +234,7 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
     private func updateList(_ items: [WebBookmark]) {
         bookmarks = items
         status.stringValue = ""
-        countLabel.stringValue = "\(items.count) 条"
+        countLabel.stringValue = L10n.text("bookmarks.bookmarks", "{count} 条", ["count": String(describing: items.count)])
         scroll.isHidden = items.isEmpty
         emptyState.isHidden = !items.isEmpty
         table.reloadData()
@@ -250,7 +242,7 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
 
     @objc private func addBookmark() {
         guard let bookmark = WebBookmark(title: titleField.stringValue, address: addressField.stringValue) else {
-            status.stringValue = "请输入有效的 HTTP 或 HTTPS 网址。"
+            status.stringValue = L10n.text("bookmarks.enterAValidHttpOrHttpsUrl", "请输入有效的 HTTP 或 HTTPS 网址。")
             return
         }
 
@@ -262,20 +254,21 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
             table.scrollRowToVisible(0)
             onChange?(items)
         } catch {
-            status.stringValue = "无法保存书签，请重试。"
+            status.stringValue = L10n.text("bookmarks.couldNotSaveTheBookmarkTryAgain", "无法保存书签，请重试。")
         }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { bookmarks.count }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard bookmarks.indices.contains(row) else { return nil }
         let bookmark = bookmarks[row]
         let open = BookmarkActionButton(title: "", target: self, action: #selector(openFromList(_:)))
         open.isBordered = false
         open.wantsLayer = true
         open.tag = row
         open.toolTip = bookmark.url.absoluteString
-        open.setAccessibilityLabel("打开书签 \(bookmark.title)")
+        open.setAccessibilityLabel(L10n.text("island.openBookmark", "打开书签 {arg1}", ["arg1": String(describing: bookmark.title)]))
 
         let title = NSTextField(labelWithString: bookmark.title)
         title.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -314,8 +307,8 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
         remove.imagePosition = .imageOnly
         remove.contentTintColor = .secondaryLabelColor
         remove.tag = row
-        remove.toolTip = "删除书签"
-        remove.setAccessibilityLabel("删除书签 \(bookmark.title)")
+        remove.toolTip = L10n.text("bookmarks.deleteBookmark", "删除书签")
+        remove.setAccessibilityLabel(L10n.text("bookmarks.deleteBookmark.486", "删除书签 {arg1}", ["arg1": String(describing: bookmark.title)]))
         let cell = ToolSurfaceView(radius: 12)
         for button in [open, remove] {
             button.translatesAutoresizingMaskIntoConstraints = false
@@ -341,11 +334,11 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
         guard bookmarks.indices.contains(sender.tag), let window, window.attachedSheet == nil else { return }
         let bookmark = bookmarks[sender.tag]
         let alert = NSAlert()
-        alert.messageText = "删除这条书签？"
+        alert.messageText = L10n.text("bookmarks.deleteThisBookmark", "删除这条书签？")
         alert.informativeText = bookmark.title
-        let cancel = alert.addButton(withTitle: "取消")
+        let cancel = alert.addButton(withTitle: L10n.text("passwords.cancel", "取消"))
         cancel.keyEquivalent = "\r"
-        let remove = alert.addButton(withTitle: "删除")
+        let remove = alert.addButton(withTitle: L10n.text("passwords.delete", "删除"))
         remove.keyEquivalent = ""
         remove.hasDestructiveAction = true
         alert.beginSheetModal(for: window) { [weak self] response in
@@ -355,13 +348,13 @@ final class WebBookmarksWindowController: NSWindowController, NSTableViewDataSou
                 updateList(items)
                 onChange?(items)
             } catch {
-                status.stringValue = "无法删除书签，请重试。"
+                status.stringValue = L10n.text("bookmarks.couldNotDeleteTheBookmarkTryAgain", "无法删除书签，请重试。")
             }
         }
     }
 
     @objc private func openFromList(_ sender: NSButton) {
         guard bookmarks.indices.contains(sender.tag) else { return }
-        status.stringValue = openBookmark(bookmarks[sender.tag]) ? "" : "无法打开该网页。"
+        status.stringValue = openBookmark(bookmarks[sender.tag]) ? "" : L10n.text("bookmarks.couldNotOpenThePage", "无法打开该网页。")
     }
 }

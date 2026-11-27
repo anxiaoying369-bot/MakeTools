@@ -64,8 +64,8 @@ final class SystemCalendarStore {
 
         var title: String {
             switch self {
-            case .events: return "日历"
-            case .reminders: return "提醒事项"
+            case .events: return L10n.text("calendar.calendar", "日历")
+            case .reminders: return L10n.text("calendar.reminders", "提醒事项")
             }
         }
 
@@ -129,7 +129,7 @@ final class SystemCalendarStore {
         let predicate = store.predicateForEvents(withStart: range.start, end: range.end, calendars: nil)
         let events = store.events(matching: predicate).compactMap { event -> SystemCalendarEvent? in
             guard event.status != .canceled, let start = event.startDate, let end = event.endDate else { return nil }
-            return SystemCalendarEvent(title: event.title ?? "未命名日程", calendarName: event.calendar?.title ?? "日历",
+            return SystemCalendarEvent(title: event.title ?? L10n.text("calendar.untitledEvent", "未命名日程"), calendarName: event.calendar?.title ?? L10n.text("calendar.calendar", "日历"),
                                        start: start, end: end, isAllDay: event.isAllDay)
         }.sorted {
             if $0.isAllDay != $1.isAllDay { return $0.isAllDay }
@@ -161,7 +161,7 @@ final class SystemCalendarStore {
         let predicate = store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
         reminderRequest = store.fetchReminders(matching: predicate) { [weak self] fetched in
             let reminders = fetched?.map {
-                SystemCalendarReminder(title: $0.title ?? "未命名待办", listName: $0.calendar?.title ?? "提醒事项",
+                SystemCalendarReminder(title: $0.title ?? L10n.text("calendar.untitledReminder", "未命名待办"), listName: $0.calendar?.title ?? L10n.text("calendar.reminders", "提醒事项"),
                                        dueComponents: $0.dueDateComponents, calendar: calendar)
             }
             DispatchQueue.main.async {

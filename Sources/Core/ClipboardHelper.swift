@@ -4,7 +4,7 @@ import Foundation
 /// Shared pasteboard utilities for both MakeTools app and extensions.
 public enum ClipboardHelper {
     public static let messageHandlerName = "clipboard"
-    public static let copiedTitle = "已复制 ✓"
+    public static var copiedTitle: String { L10n.text("common.copied", "已复制 ✓") }
     private static var pendingTimers: [ObjectIdentifier: DispatchWorkItem] = [:]
 
     /// Writes plain UTF-8 text to the system general pasteboard.
@@ -16,6 +16,15 @@ public enum ClipboardHelper {
 
     private static let concealedType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
     private static let transientType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+
+    /// Copies a short-lived link without adding it to the clipboard history.
+    static func copyTransientText(_ text: String, to pasteboard: NSPasteboard = .general) -> Bool {
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        item.setData(Data(), forType: transientType)
+        pasteboard.clearContents()
+        return pasteboard.writeObjects([item])
+    }
 
     static func historyText(from pasteboard: NSPasteboard) -> String? {
         guard pasteboard.availableType(from: [concealedType, transientType]) == nil else { return nil }

@@ -228,15 +228,32 @@ struct DynamicIslandTests {
     private static func testCustomExpandedLayout() {
         let screen = NSRect(x: 0, y: 0, width: 1512, height: 982)
         let order = IslandExpandedCard.restoredOrder(from: ["shelf", "shelf", "unknown", "focus"])
-        check(order == [.shelf, .focus, .performance, .audio, .calendar, .bookmarks],
+        check(order == [.shelf, .focus, .performance, .audio, .calendar, .bookmarks, .lanTransfer],
               "Saved layouts should keep unique cards and append new cards")
         check(IslandExpandedCard.restoredOrder(from: []) == IslandExpandedCard.allCases,
               "An existing installation should keep the default order")
-        check(IslandExpandedLayout.grid.gridRows(for: order) == [[.shelf, .focus], [.performance, .audio], [.calendar, .bookmarks]],
+        check(IslandExpandedLayout.grid.gridRows(for: order) == [[.shelf, .focus], [.performance, .audio], [.calendar, .bookmarks], [.lanTransfer]],
               "Grid fills rows from left to right according to the saved order")
         check(IslandExpandedLayout.grid.gridRows(for: [.audio, .shelf, .focus]) == [[.audio, .shelf], [.focus]],
               "A grid with an odd number of active cards should include a final single-card row")
 
+        let enabled = Set(IslandExpandedCard.allCases)
+        var draft = IslandLayoutDraft.defaults
+        draft.hidden.insert(.focus)
+        check(!draft.visible(in: enabled).contains(.focus), "Removed cards should leave the preview")
+        draft.place(.focus, nextTo: .performance)
+        check(draft.visible(in: enabled).prefix(2) == [.focus, .performance] && !draft.hidden.contains(.focus),
+              "Adding a card should insert it at the selected position")
+        draft.place(.focus, nextTo: .audio, after: true)
+        check(draft.visible(in: enabled).prefix(3) == [.performance, .audio, .focus],
+              "Dropping after a card should place the source immediately after it")
+        let excludesAudio: Set<IslandExpandedCard> = enabled.subtracting([.audio])
+        draft.move(.focus, by: -1, enabled: excludesAudio)
+        check(draft.visible(in: excludesAudio).first == .focus && draft.order.contains(.audio),
+              "Keyboard order should skip disabled cards without losing their saved position")
+        let beforePinnedMove = draft
+        draft.move(.shelf, by: -1, enabled: enabled)
+        check(draft == beforePinnedMove, "Shelf position is controlled by its selected side outside the grid")
         let left = IslandGeometry.compute(screenFrame: screen, safeAreaTop: 0, notchWidth: nil,
                                           style: .auto, state: .expanded, expandedLayout: .shelfLeft)
         let right = IslandGeometry.compute(screenFrame: screen, safeAreaTop: 0, notchWidth: nil,
@@ -295,6 +312,13 @@ struct DynamicIslandTests {
             check(false, "Calendar event persistence failed: \(error)")
         }
 
+        check(DynamicIslandMaterial.restored("frostedGlass").usesBackdrop,
+              "Frosted Glass should retain its backdrop when restoring settings")
+        check(DynamicIslandMaterial.restored(nil) == .midnight && DynamicIslandMaterial.restored("unknown") == .midnight,
+              "Older settings and invalid materials should restore to Midnight Blue")
+        check(IslandExpandedLayout.shelfLeft.usesGrid(cardCount: 3, hasShelf: false),
+              "Hiding the shelf should leave enough width for three remaining cards")
+
         let bento = IslandExpandedLayout.shelfRight.bodySize(cardCount: 5, hasShelf: true)
         check(bento.height == 309, "A fourth compact card should enlarge both bento columns")
         check(IslandExpandedLayout.shelfRight.usesGrid(cardCount: 4, hasShelf: false),
@@ -347,6 +371,9 @@ struct DynamicIslandTests {
         let grid = CalendarCountdown.monthGrid(containing: now, calendar: calendar)
         check(grid.count == 42, "Calendar should show six complete weeks")
         check(calendar.component(.weekday, from: grid[0]) == 2, "Calendar should begin on a Monday")
+        let sundayGrid = CalendarCountdown.monthGrid(containing: now, calendar: calendar, firstWeekday: 1)
+        check(sundayGrid.count == 42 && calendar.component(.weekday, from: sundayGrid[0]) == 1,
+              "Regions that start the week on Sunday should show Sunday as the first column")
         check(CountdownDay(isoDate: "2026-02-29") == nil, "Holiday decoder should reject nonexistent days")
         let newYear = CountdownDay(isoDate: "2026-02-17")!.date(in: calendar)!
         check(CalendarCountdown.lunarLabel(for: newYear, calendar: lunar, includingMonth: true) == "正月初一",
@@ -368,15 +395,50 @@ struct DynamicIslandTests {
         {"name":"国庆节","date":"2026-10-10","isOffDay":false},
         {"name":"元旦","date":"2027-01-01","isOffDay":true}]}
         """
-        let year = try! JSONDecoder().decode(ChinaHolidayYear.self, from: Data(json.utf8))
+        let year = try! JSONDecoder().decode(HolidayYear.self, from: Data(json.utf8))
         check(year.validatedDays(for: 2025) == nil, "A holiday dataset cannot be saved under a different year")
         let days = year.validatedDays(for: 2026) ?? []
         check(days.count == 4 && days.contains { !$0.isOffDay }, "The data should preserve makeup workdays and cross-year dates")
+        let nationalJSON = """
+        [
+          {"date":"2026-01-01","localName":"元日","name":"New Year's Day","countryCode":"JP","global":true,"types":["Public"]},
+          {"date":"2026-01-02","localName":"地域の休み","name":"Regional Holiday","countryCode":"JP","global":false,"types":["Public"]},
+          {"date":"2026-01-03","localName":"記念日","name":"Observance","countryCode":"JP","global":true,"types":["Observance"]},
+          {"date":"2026-07-04","localName":"Independence Day","name":"Independence Day","countryCode":"US","global":true,"types":["Public"]}
+        ]
+        """
+        let japan = InternationalHoliday.nationalHolidays(from: Data(nationalJSON.utf8), year: 2026, country: "JP")
+        check(japan?.validatedDays(for: 2026)?.map(\.name) == ["元日"],
+              "The holiday feed should only include nationwide public holidays for the selected country")
+        check(japan?.validatedDays(for: 2026, preferEnglish: true)?.map(\.name) == ["New Year's Day"],
+              "The holiday feed should preserve an English name where available")
+        let suite = "MakeTools.HolidayTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let encoder = JSONEncoder()
+        let china = HolidayCalendar.CachedYear(updatedAt: now, holidays: year)
+        defaults.set(try! encoder.encode([2026: china]), forKey: "MakeTools.DynamicIsland.chinaHolidays")
+        defaults.set(try! encoder.encode(["JP": [2026: HolidayCalendar.CachedYear(updatedAt: now, holidays: japan!)]]),
+                     forKey: "MakeTools.DynamicIsland.regionalHolidays")
+        let holidays = HolidayCalendar(defaults: defaults, systemRegion: { "CN" })
+        defaults.set("ZZ", forKey: "MakeTools.DynamicIsland.holidayRegion")
+        let invalidSelection = HolidayCalendar(defaults: defaults, systemRegion: { "CN" })
+        check(invalidSelection.selectedRegion == nil && invalidSelection.region == "CN",
+              "An invalid stored region should fall back to the system")
+        defaults.removeObject(forKey: "MakeTools.DynamicIsland.holidayRegion")
+        let japanNewYear = CountdownDay(isoDate: "2026-01-01")!
+        check(holidays.daysByDate[today] != nil, "The existing Chinese holiday cache should remain available")
+        holidays.setRegion("JP")
+        check(holidays.daysByDate[today] == nil && holidays.daysByDate[japanNewYear] != nil,
+              "Changing regions must replace the displayed holiday cache")
+        holidays.setRegion(nil)
+        check(holidays.region == "CN" && holidays.daysByDate[today] != nil && holidays.daysByDate[japanNewYear] == nil,
+              "Following the system should restore the system region without leaking previously selected holidays")
         let countdown = HolidayCountdown.upcoming(in: days, now: now, calendar: calendar)
         check(countdown.map(\.holiday.name) == ["国庆节", "元旦"] && countdown.first?.days == 0,
               "Holiday countdown should group the break and ignore makeup workdays")
         check(IslandExpandedCard.moving(.calendar, onto: .audio, in: IslandExpandedCard.allCases)
-                == [.performance, .calendar, .audio, .focus, .shelf, .bookmarks],
+                == [.performance, .calendar, .audio, .focus, .shelf, .bookmarks, .lanTransfer],
               "Dragging a card earlier should preserve the relative order of other cards")
         check(IslandExpandedCard.moving(.performance, onto: .focus, in: [.performance, .audio, .focus, .calendar])
                 == [.audio, .focus, .performance, .calendar],
@@ -546,11 +608,40 @@ struct DynamicIslandTests {
             state: .collapsed
         )
         check(!forcedFloating.isTopAttached, "Explicit .floatingPill style should detach from top even on notch display")
+        check(forcedFloating.panelFrame.minY + forcedFloating.pillRect.maxY == screen.maxY - 41,
+              "A floating capsule should sit below the hardware camera cutout")
+        let belowMenu = IslandGeometry.compute(screenFrame: screen, safeAreaTop: 0, notchWidth: nil,
+            style: .floatingPill, state: .collapsed, floatingTopInset: 24)
+        check(belowMenu.panelFrame.maxY == screen.maxY - 24,
+              "The floating window itself must not cover the menu bar")
+        check(belowMenu.panelFrame.minY + belowMenu.pillRect.maxY == screen.maxY - 28,
+              "A floating capsule should sit below the menu bar on a notchless screen")
+        let withFiles = IslandGeometry.compute(screenFrame: screen, safeAreaTop: 37, notchWidth: 180,
+            style: .floatingPill, state: .collapsed, collapsedFileCount: 9)
+        let shelf = withFiles.collapsedShelfRect!
+        check(shelf.width > withFiles.pillRect.width && shelf.midX == withFiles.pillRect.midX,
+              "A wide shelf should remain centered without stretching the capsule")
+        check(shelf.maxY < withFiles.pillRect.minY &&
+              !withFiles.interactionRect(for: withFiles.pillRect).contains(NSPoint(x: shelf.midX, y: shelf.midY)),
+              "The file shelf must stay outside the capsule hover region")
+        check(withFiles.panelFrame.minY + withFiles.pillRect.maxY == forcedFloating.panelFrame.minY + forcedFloating.pillRect.maxY,
+              "Revealing the shelf must preserve the capsule's screen position")
+        let expandedWithFiles = IslandGeometry.compute(screenFrame: screen, safeAreaTop: 37, notchWidth: 180,
+            style: .floatingPill, state: .expanded, collapsedFileCount: 9)
+        check(expandedWithFiles.collapsedShelfRect == nil, "The collapsed shelf should only appear when collapsed")
         check(forcedFloating.earRadius == 0, "Floating pill should have zero concave ear radius")
         check(forcedFloating.cornerRadius == forcedFloating.pillSize.height / 2.0, "Floating collapsed pill should have full capsule radius")
     }
 
     private static func testFocusTimerModel() {
+        let delayed = FocusTimerModel(minutes: 1)
+        delayed.start()
+        check(!delayed.tick(elapsedSeconds: 17) && delayed.remainingSeconds == 43,
+              "A delayed timer callback should consume the elapsed time")
+        check(delayed.tick(elapsedSeconds: 50) && delayed.remainingSeconds == 0 && !delayed.isRunning,
+              "A timer overdue after sleep should complete without going below zero")
+        check(!delayed.tick(elapsedSeconds: 20), "Completion should not repeat after a delayed callback")
+
         let timer = FocusTimerModel(minutes: 1)
         check(timer.totalSeconds == 60, "1 minute duration should equal 60 seconds")
         check(timer.formattedRemaining == "01:00", "Initial formatted time should be 01:00")

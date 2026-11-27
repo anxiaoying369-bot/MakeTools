@@ -4,8 +4,8 @@ import WebKit
 
 public final class MarkdownPreviewTool: ToolModule {
     public let id = "markdown-preview"
-    public let title = "Markdown 预览"
-    public let subtitle = "离线渲染与代码复制"
+    public let title = L10n.text("markdown.markdownPreview", "Markdown 预览")
+    public let subtitle = L10n.text("markdown.offlineRenderingAndCodeCopying", "离线渲染与代码复制")
     public let symbolName = "doc.richtext"
 
     public init() {}
@@ -22,25 +22,30 @@ public final class MarkdownToolViewController: NSViewController, WKNavigationDel
     private var copyMarkdownButton: NSButton?
     private var copyPlainTextButton: NSButton?
     private var currentMarkdown: String = ""
+    struct Preview {
+        let url: URL
+        let markdown: String
+    }
+    private(set) var preview: Preview?
 
     public override var nibName: NSNib.Name? { nil }
 
     public override func loadView() {
         let rootView = NSView()
 
-        let openButton = NSButton(title: "打开文件…", target: self, action: #selector(openDocument(_:)))
+        let openButton = NSButton(title: L10n.text("markdown.openFile", "打开文件…"), target: self, action: #selector(openDocument(_:)))
         ToolAppearance.configure(openButton, symbol: "folder")
 
-        let label = NSTextField(labelWithString: "内置演示")
-        let context = NSTextField(labelWithString: "Markdown 预览")
+        let label = NSTextField(labelWithString: L10n.text("markdown.builtInDemo", "内置演示"))
+        let context = NSTextField(labelWithString: L10n.text("markdown.markdownPreview", "Markdown 预览"))
         fileLabel = label
         contextLabel = context
 
-        let copyMDButton = NSButton(title: "复制 Markdown", target: self, action: #selector(copyMarkdown(_:)))
+        let copyMDButton = NSButton(title: L10n.text("quickLook.copyMarkdown", "复制 Markdown"), target: self, action: #selector(copyMarkdown(_:)))
         ToolAppearance.configureCopy(copyMDButton, symbol: "doc.on.doc")
         self.copyMarkdownButton = copyMDButton
 
-        let copyTextButton = NSButton(title: "复制纯文本", target: self, action: #selector(copyPlainText(_:)))
+        let copyTextButton = NSButton(title: L10n.text("quickLook.copyPlainText", "复制纯文本"), target: self, action: #selector(copyPlainText(_:)))
         ToolAppearance.configureCopy(copyTextButton, symbol: "text.alignleft")
         self.copyPlainTextButton = copyTextButton
 
@@ -112,7 +117,14 @@ public final class MarkdownToolViewController: NSViewController, WKNavigationDel
             }
             content = fallback as String
         }
-        render(markdown: content, title: url.lastPathComponent)
+        restorePreview(Preview(url: url, markdown: content))
+    }
+
+    func restorePreview(_ preview: Preview) {
+        loadViewIfNeeded()
+        self.preview = preview
+        let url = preview.url
+        render(markdown: preview.markdown, title: url.lastPathComponent)
         fileLabel?.stringValue = url.lastPathComponent
         fileLabel?.toolTip = url.path
         contextLabel?.stringValue = url.deletingLastPathComponent().path
@@ -153,7 +165,7 @@ public final class MarkdownToolViewController: NSViewController, WKNavigationDel
     @objc private func copyMarkdown(_ sender: Any?) {
         ClipboardHelper.copyText(currentMarkdown)
         if let button = copyMarkdownButton {
-            ClipboardHelper.flashButton(button, restoreTitle: "复制 Markdown")
+            ClipboardHelper.flashButton(button, restoreTitle: L10n.text("quickLook.copyMarkdown", "复制 Markdown"))
         }
     }
 
@@ -164,7 +176,7 @@ public final class MarkdownToolViewController: NSViewController, WKNavigationDel
             let text = (result as? String) ?? self?.currentMarkdown ?? ""
             ClipboardHelper.copyText(text)
             if let button {
-                ClipboardHelper.flashButton(button, restoreTitle: "复制纯文本")
+                ClipboardHelper.flashButton(button, restoreTitle: L10n.text("quickLook.copyPlainText", "复制纯文本"))
             }
         }
     }
@@ -197,21 +209,17 @@ public final class MarkdownToolViewController: NSViewController, WKNavigationDel
     // MARK: - Private Helpers
 
     private func loadInitialDemo() {
-        if let demoURL = Bundle.main.url(forResource: "demo", withExtension: "md"),
+        let bundle = Bundle.main
+        let language = L10n.locale.language.languageCode?.identifier
+        let localizedDemo = language == "zh" ? nil
+            : bundle.url(forResource: "demo", withExtension: "md", subdirectory: nil, localization: "en")
+        let defaultDemo = bundle.resourceURL?.appendingPathComponent("demo.md")
+        if let demoURL = localizedDemo ?? defaultDemo,
            let content = try? String(contentsOf: demoURL, encoding: .utf8) {
             render(markdown: content, title: "demo.md")
             return
         }
-
-        let fallback = """
-        # MakeTools · Markdown 预览
-
-        这是 **MakeTools** 个人效率工具集内置的第一个小工具。在访达（Finder）中选中任意 `.md` 文件并按下 **空格键** 即可触发 Quick Look 预览。
-
-        > [!TIP]
-        > 点击工具栏的 **打开文件…** 可在应用内直接测试渲染与复制功能。
-        """
-        render(markdown: fallback, title: "MakeTools")
+        render(markdown: "# MakeTools", title: "MakeTools")
     }
 
     private func render(markdown: String, title: String) {

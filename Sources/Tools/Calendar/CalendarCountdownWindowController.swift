@@ -12,7 +12,7 @@ private final class CalendarListDocument: NSView {
 
 final class CalendarCountdownWindowController: NSWindowController {
     private weak var manager: DynamicIslandManager?
-    private let holidays = ChinaHolidayCalendar.shared
+    private let holidays = HolidayCalendar.shared
     private let systemCalendar = SystemCalendarStore()
     private var observers: [NSObjectProtocol] = []
     private var isRequestingAccess = false
@@ -20,7 +20,10 @@ final class CalendarCountdownWindowController: NSWindowController {
     private var systemDate: Date?
     private let monthGrid = CalendarMonthGrid()
     private let monthHeading = NSTextField(labelWithString: "")
-    private let showLunar = NSButton(checkboxWithTitle: "显示农历", target: nil, action: nil)
+    private let holidayRegionPicker = NSPopUpButton()
+    private var holidayRegionRow: NSStackView?
+    private let holidayLegend = NSTextField(labelWithString: "")
+    private let showLunar = NSButton(checkboxWithTitle: L10n.text("calendar.showLunarDates", "显示农历"), target: nil, action: nil)
     private let datePicker = NSDatePicker()
     private let dateMode = NSPopUpButton()
     private let lunarYear = NSPopUpButton()
@@ -33,13 +36,13 @@ final class CalendarCountdownWindowController: NSWindowController {
     private let selectedDateLabel = NSTextField(wrappingLabelWithString: "")
     private let dateSummary = NSTextField(labelWithString: "")
     private let feedback = NSTextField(wrappingLabelWithString: "")
-    private let saveButton = NSButton(title: "添加事件", target: nil, action: nil)
-    private let deleteButton = NSButton(title: "删除事件", target: nil, action: nil)
+    private let saveButton = NSButton(title: L10n.text("calendar.addEvent", "添加事件"), target: nil, action: nil)
+    private let deleteButton = NSButton(title: L10n.text("calendar.deleteEvent", "删除事件"), target: nil, action: nil)
     private enum Tab: Int {
         case countdown, holidays, system
     }
 
-    private let mode = NSSegmentedControl(labels: ["我的倒计时", "节假日", "系统日历"], trackingMode: .selectOne, target: nil, action: nil)
+    private let mode = NSSegmentedControl(labels: [L10n.text("calendar.myCountdowns", "我的倒计时"), L10n.text("calendar.holidays", "节假日"), L10n.text("calendar.systemCalendar", "系统日历")], trackingMode: .selectOne, target: nil, action: nil)
     private let eventList = NSStackView()
     private let editor = NSStackView()
     private var listHeight: NSLayoutConstraint?
@@ -56,11 +59,12 @@ final class CalendarCountdownWindowController: NSWindowController {
 
     init(manager: DynamicIslandManager) {
         self.manager = manager
-        let panel = CalendarCountdownPanel(contentRect: NSRect(x: 0, y: 0, width: 820, height: 465),
+        let panel = CalendarCountdownPanel(contentRect: NSRect(x: 0, y: 0, width: 860, height: 500),
                                             styleMask: [.titled, .closable, .nonactivatingPanel],
                                             backing: .buffered, defer: false)
-        panel.title = "日历与日期倒计时"
-        panel.contentMinSize = NSSize(width: 820, height: 465)
+        panel.backgroundColor = ToolAppearance.canvas
+        panel.title = L10n.text("calendar.calendarAndCountdowns", "日历与日期倒计时")
+        panel.contentMinSize = NSSize(width: 860, height: 500)
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.level = .floating
@@ -70,7 +74,7 @@ final class CalendarCountdownWindowController: NSWindowController {
         panel.setContentSize(panel.contentMinSize)
         let center = NotificationCenter.default
         observers = [
-            center.addObserver(forName: ChinaHolidayCalendar.didUpdate, object: holidays, queue: .main) { [weak self] _ in
+            center.addObserver(forName: HolidayCalendar.didUpdate, object: holidays, queue: .main) { [weak self] _ in
                 self?.renderIfVisible()
             },
             center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main) { [weak self] _ in
@@ -120,24 +124,22 @@ final class CalendarCountdownWindowController: NSWindowController {
 
     private func configureView() {
         guard let window, let root = window.contentView else { return }
-        let previous = button("上个月", symbol: "chevron.left", action: #selector(changeMonth(_:)))
+        let previous = button(L10n.text("calendar.previousMonth", "上个月"), symbol: "chevron.left", action: #selector(changeMonth(_:)))
         previous.tag = -1
-        let next = button("下个月", symbol: "chevron.right", action: #selector(changeMonth(_:)))
+        let next = button(L10n.text("calendar.nextMonth", "下个月"), symbol: "chevron.right", action: #selector(changeMonth(_:)))
         next.tag = 1
         monthHeading.font = .systemFont(ofSize: 20, weight: .semibold)
         monthHeading.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let today = button("今天", symbol: "calendar", action: #selector(handleToday))
+        let today = button(L10n.text("calendar.today.71", "今天"), symbol: "calendar", action: #selector(handleToday))
         let spacer = NSView()
         spacer.setContentHuggingPriority(.fittingSizeCompression, for: .horizontal)
         let monthHeader = horizontal([previous, next, monthHeading, spacer, today], spacing: 7)
 
         showLunar.target = self
         showLunar.action = #selector(toggleLunar)
-        showLunar.state = (UserDefaults.standard.object(forKey: Self.showLunarKey) as? Bool ?? true) ? .on : .off
-        let legend = NSTextField(labelWithString: "休  节假日     班  调休补班")
-        legend.font = .systemFont(ofSize: 11)
-        legend.textColor = .secondaryLabelColor
-        let calendarFooter = horizontal([showLunar, legend], spacing: 14)
+        holidayLegend.font = .systemFont(ofSize: 11)
+        holidayLegend.textColor = .secondaryLabelColor
+        let calendarFooter = horizontal([showLunar, holidayLegend], spacing: 14)
         monthGrid.onSelectDate = { [weak self] date in self?.selectDate(date) }
         let monthColumn = vertical([monthHeader, monthGrid, calendarFooter], spacing: 12)
         for item in [monthHeader, monthGrid, calendarFooter] {
@@ -160,22 +162,22 @@ final class CalendarCountdownWindowController: NSWindowController {
         datePicker.dateValue = Date()
         datePicker.target = self
         datePicker.action = #selector(handleDateChanged)
-        datePicker.setAccessibilityLabel("事件日期")
-        dateMode.addItems(withTitles: ["公历", "农历"])
+        datePicker.setAccessibilityLabel(L10n.text("calendar.eventDate", "事件日期"))
+        dateMode.addItems(withTitles: [L10n.text("calendar.gregorian", "公历"), L10n.text("calendar.lunar", "农历")])
         dateMode.target = self
         dateMode.action = #selector(handleDateModeChanged)
-        dateMode.setAccessibilityLabel("事件日期历法")
-        titleField.placeholderString = "事件名称"
-        titleField.setAccessibilityLabel("事件名称")
+        dateMode.setAccessibilityLabel(L10n.text("calendar.eventCalendar", "事件日期历法"))
+        titleField.placeholderString = L10n.text("calendar.eventName", "事件名称")
+        titleField.setAccessibilityLabel(L10n.text("calendar.eventName", "事件名称"))
 
         setup(saveButton, symbol: "checkmark", action: #selector(handleSave))
         saveButton.keyEquivalent = "\r"
         setup(deleteButton, symbol: "trash", action: #selector(handleDelete))
-        let add = button("新增", symbol: "plus", action: #selector(startNewEvent))
+        let add = button(L10n.text("calendar.new", "新增"), symbol: "plus", action: #selector(startNewEvent))
         lunarInputs.orientation = .horizontal
         lunarInputs.alignment = .centerY
         lunarInputs.spacing = 4
-        for (picker, label) in [(lunarYear, "农历年份"), (lunarMonth, "农历月份"), (lunarDay, "农历日期")] {
+        for (picker, label) in [(lunarYear, L10n.text("calendar.lunarYear", "农历年份")), (lunarMonth, L10n.text("calendar.lunarMonth", "农历月份")), (lunarDay, L10n.text("calendar.lunarDay", "农历日期"))] {
             picker.controlSize = .small
             picker.target = self
             picker.action = #selector(handleLunarDateChanged(_:))
@@ -195,30 +197,33 @@ final class CalendarCountdownWindowController: NSWindowController {
         let height = list.heightAnchor.constraint(equalToConstant: 174)
         height.isActive = true
         listHeight = height
-        let sidebar = vertical([mode, selectedDateLabel, dateSummary, list, editor, feedback], spacing: 10)
-        for item in [mode, selectedDateLabel, list, editor, feedback] {
+        let regionTitle = L10n.text("calendar.holidayRegion", "节假日地区")
+        holidayRegionPicker.target = self
+        holidayRegionPicker.action = #selector(handleHolidayRegion)
+        holidayRegionPicker.setAccessibilityLabel(regionTitle)
+        holidayRegionPicker.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let regionRow = horizontal([NSTextField(labelWithString: regionTitle), holidayRegionPicker], spacing: 8)
+        holidayRegionRow = regionRow
+        let sidebar = vertical([mode, selectedDateLabel, dateSummary, regionRow, list, editor, feedback], spacing: 10)
+        for item in [mode, selectedDateLabel, regionRow, list, editor, feedback] {
             item.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
         }
 
-        let separator = NSBox()
-        separator.boxType = .separator
-        for view in [monthColumn, separator, sidebar] {
+        let monthCard = ToolAppearance.section(monthColumn, inset: 13)
+        let detailCard = ToolAppearance.section(sidebar, inset: 14)
+        for view in [monthCard, detailCard] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
         NSLayoutConstraint.activate([
-            monthColumn.topAnchor.constraint(equalTo: root.topAnchor, constant: 19),
-            monthColumn.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
-            monthColumn.widthAnchor.constraint(equalToConstant: 445),
-            monthColumn.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -18),
-            separator.leadingAnchor.constraint(equalTo: monthColumn.trailingAnchor, constant: 18),
-            separator.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
-            separator.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
-            separator.widthAnchor.constraint(equalToConstant: 1),
-            sidebar.leadingAnchor.constraint(equalTo: separator.trailingAnchor, constant: 16),
-            sidebar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
-            sidebar.topAnchor.constraint(equalTo: root.topAnchor, constant: 19),
-            sidebar.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -18)
+            monthCard.topAnchor.constraint(equalTo: root.topAnchor, constant: 17),
+            monthCard.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 17),
+            monthCard.widthAnchor.constraint(equalToConstant: 470),
+            monthCard.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -17),
+            detailCard.leadingAnchor.constraint(equalTo: monthCard.trailingAnchor, constant: 13),
+            detailCard.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -17),
+            detailCard.topAnchor.constraint(equalTo: monthCard.topAnchor),
+            detailCard.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -17)
         ])
         window.initialFirstResponder = titleField
         updateEditorButtons()
@@ -286,23 +291,30 @@ final class CalendarCountdownWindowController: NSWindowController {
         if displayedYear != today.year { holidays.refresh(around: displayedYear, now: now) }
 
         let parts = calendar.dateComponents([.year, .month], from: month)
-        monthHeading.stringValue = "\(parts.year ?? today.year) 年 \(parts.month ?? today.month) 月"
+        monthHeading.stringValue = L10n.text("calendar.format", "{arg1} 年 {arg2} 月", ["arg1": String(describing: parts.year ?? today.year), "arg2": String(describing: parts.month ?? today.month)])
+        let chineseHolidays = holidays.region == "CN"
+        showLunar.state = (UserDefaults.standard.object(forKey: Self.showLunarKey) as? Bool ?? chineseHolidays) ? .on : .off
+        holidayLegend.stringValue = chineseHolidays
+            ? L10n.text("calendar.offPublicHolidayWorkMakeupWorkday", "休  节假日     班  调休补班")
+            : L10n.text("calendar.publicHolidayLegend", "休  公共假日")
         let lunar = showLunar.state == .on
         let date = selectedDate
-        let visibleDays = CalendarCountdown.monthGrid(containing: month, calendar: calendar)
+        let weekStart = holidays.selectedRegion.map { Locale(identifier: "en_\($0)").calendar.firstWeekday }
+            ?? Locale.autoupdatingCurrent.calendar.firstWeekday
+        let visibleDays = CalendarCountdown.monthGrid(containing: month, calendar: calendar, firstWeekday: weekStart)
         systemCalendar.refresh(visibleDays: visibleDays, calendar: calendar, force: refreshSystem)
         monthGrid.update(dates: visibleDays, month: month, selected: date, now: now, calendar: calendar,
                          showLunar: lunar, holidays: holidays.daysByDate,
                          eventDays: Set(systemCalendar.eventsByDay.keys), reminderDays: Set(systemCalendar.remindersByDay.keys))
         let day = CountdownDay(date: date, calendar: calendar)
-        let formatted = DateFormatter.localizedString(from: date, dateStyle: .medium, timeStyle: .none)
+        let formatted = date.formatted(.dateTime.year().month(.abbreviated).day().locale(L10n.locale))
         let lunarText = lunar ? CalendarCountdown.lunarLabel(
             for: date, calendar: CalendarCountdown.lunarCalendar(timeZone: calendar.timeZone), includingMonth: true
         ) : ""
-        let holidayText = holidays.daysByDate[day].map { "\($0.name) · \($0.isOffDay ? "休息" : "补班")" } ?? ""
+        let holidayText = holidays.daysByDate[day].map { "\($0.name) · \($0.isOffDay ? L10n.text("calendar.dayOff", "休息") : L10n.text("calendar.makeupDay", "补班"))" } ?? ""
         selectedDateLabel.stringValue = [formatted, lunarText, holidayText].filter { !$0.isEmpty }.joined(separator: "  ·  ")
         dateSummary.isHidden = activeTab == .system
-        dateSummary.stringValue = day.days(from: now, calendar: calendar).map(CalendarCountdown.status(for:)) ?? "日期不可用"
+        dateSummary.stringValue = day.days(from: now, calendar: calendar).map(CalendarCountdown.status(for:)) ?? L10n.text("calendar.dateUnavailable", "日期不可用")
         renderList(now: now, calendar: calendar)
     }
 
@@ -310,15 +322,17 @@ final class CalendarCountdownWindowController: NSWindowController {
         for row in eventList.arrangedSubviews { eventList.removeArrangedSubview(row); row.removeFromSuperview() }
         editor.isHidden = activeTab != .countdown
         feedback.isHidden = activeTab != .countdown
+        holidayRegionRow?.isHidden = activeTab != .holidays
         listHeight?.constant = activeTab == .system ? 320 : 174
         switch activeTab {
         case .system:
             renderSystemList(calendar: calendar)
         case .holidays:
+            refreshHolidayRegionPicker()
             holidayRows = HolidayCountdown.upcoming(in: Array(holidays.daysByDate.values), now: now, calendar: calendar)
             if holidayRows.isEmpty {
                 let syncing = holidays.isSyncing(around: calendar.component(.year, from: now))
-                appendEmptyRow(syncing ? "正在同步中国大陆节假日…" : "暂无已同步的近期节假日")
+                appendEmptyRow(syncing ? L10n.text("calendar.syncingMainlandCalendarHolidays", "正在同步中国大陆节假日…") : L10n.text("calendar.noUpcomingHolidaysSynced", "暂无已同步的近期节假日"))
             }
             for (index, item) in holidayRows.enumerated() {
                 appendRow(item.holiday.name, day: item.holiday.day, days: item.days, symbol: "calendar.badge.checkmark",
@@ -326,7 +340,7 @@ final class CalendarCountdownWindowController: NSWindowController {
             }
         case .countdown:
             eventRows = CalendarCountdown.orderedEvents(manager?.calendarEvents ?? [], now: now, calendar: calendar)
-            if eventRows.isEmpty { appendEmptyRow("选择日期并添加事件") }
+            if eventRows.isEmpty { appendEmptyRow(L10n.text("calendar.selectADateAndAddAnEvent", "选择日期并添加事件")) }
             for (index, item) in eventRows.enumerated() {
                 appendRow(item.0.title, day: item.0.day, days: item.1, symbol: "hourglass", index: index,
                           selected: item.0.id == selectedID)
@@ -334,46 +348,75 @@ final class CalendarCountdownWindowController: NSWindowController {
         }
     }
 
+    private func refreshHolidayRegionPicker() {
+        let locale = L10n.locale
+        if holidayRegionPicker.numberOfItems == 0 {
+            holidayRegionPicker.addItem(withTitle: L10n.text("language.system", "跟随系统"))
+            let entries = HolidayCalendar.regions.map { code in
+                (code, locale.localizedString(forRegionCode: code) ?? code)
+            }.sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }
+            for (code, name) in entries {
+                let item = NSMenuItem(title: name, action: nil, keyEquivalent: "")
+                item.representedObject = code
+                holidayRegionPicker.menu?.addItem(item)
+            }
+        }
+        let system = Locale.autoupdatingCurrent.region?.identifier
+        holidayRegionPicker.item(at: 0)?.title = system.map {
+            L10n.text("calendar.followSystemRegion", "跟随系统（{region}）",
+                      ["region": locale.localizedString(forRegionCode: $0) ?? $0])
+        } ?? L10n.text("language.system", "跟随系统")
+        holidayRegionPicker.select(holidayRegionPicker.itemArray.first {
+            $0.representedObject as? String == holidays.selectedRegion
+        })
+    }
+
+    @objc private func handleHolidayRegion() {
+        holidays.setRegion(holidayRegionPicker.selectedItem?.representedObject as? String)
+        render()
+    }
+
     private func renderSystemList(calendar: Calendar) {
         let day = CountdownDay(date: selectedDate, calendar: calendar)
 
-        appendSectionHeading("日程")
+        appendSectionHeading(L10n.text("calendar.events", "日程"))
         if SystemCalendarStore.Source.events.access == .fullAccess {
             let events = systemCalendar.eventsByDay[day] ?? []
-            if events.isEmpty { appendEmptyRow("当天没有日程") }
+            if events.isEmpty { appendEmptyRow(L10n.text("calendar.noEventsOnThisDay", "当天没有日程")) }
             let formatter = DateIntervalFormatter()
+            formatter.locale = L10n.locale
             formatter.calendar = calendar
             formatter.timeZone = calendar.timeZone
             formatter.timeStyle = .short
             for event in events {
                 formatter.dateStyle = calendar.isDate(event.start, inSameDayAs: event.end) ? .none : .short
-                let time = event.isAllDay ? "全天" : formatter.string(from: event.start, to: max(event.end, event.start))
+                let time = event.isAllDay ? L10n.text("calendar.allDay", "全天") : formatter.string(from: event.start, to: max(event.end, event.start))
                 appendSystemRow(event.title, detail: "\(time) · \(event.calendarName)")
             }
         } else {
             appendAccessControl(for: .events)
         }
 
-        appendSectionHeading("未完成待办")
+        appendSectionHeading(L10n.text("calendar.incompleteReminders", "未完成待办"))
         if SystemCalendarStore.Source.reminders.access != .fullAccess {
             appendAccessControl(for: .reminders)
         } else if systemCalendar.reminderLoadFailed {
-            appendEmptyRow("无法读取提醒事项")
-            eventList.addArrangedSubview(button("重新同步", symbol: "arrow.clockwise", action: #selector(reloadSystemCalendar)))
+            appendEmptyRow(L10n.text("calendar.cannotReadReminders", "无法读取提醒事项"))
+            eventList.addArrangedSubview(button(L10n.text("calendar.syncAgain", "重新同步"), symbol: "arrow.clockwise", action: #selector(reloadSystemCalendar)))
         } else {
             let reminders = systemCalendar.remindersByDay[day] ?? []
             if reminders.isEmpty {
-                appendEmptyRow(systemCalendar.isLoadingReminders ? "正在读取提醒事项…" : "当天没有待办")
+                appendEmptyRow(systemCalendar.isLoadingReminders ? L10n.text("calendar.readingReminders", "正在读取提醒事项…") : L10n.text("calendar.noRemindersOnThisDay", "当天没有待办"))
             }
             for reminder in reminders {
                 let time = reminder.due.flatMap { due in
-                    reminder.hasDueTime ? DateFormatter.localizedString(from: due, dateStyle: .none, timeStyle: .short) : nil
-                } ?? "全天"
+                    reminder.hasDueTime ? due.formatted(.dateTime.hour().minute().locale(L10n.locale)) : nil
+                } ?? L10n.text("calendar.allDay", "全天")
                 appendSystemRow(reminder.title, detail: "\(time) · \(reminder.listName)")
             }
 
             if !systemCalendar.undatedReminders.isEmpty {
-                appendSectionHeading("没有日期的待办")
+                appendSectionHeading(L10n.text("calendar.remindersWithoutADate", "没有日期的待办"))
                 for reminder in systemCalendar.undatedReminders {
                     appendSystemRow(reminder.title, detail: reminder.listName)
                 }
@@ -383,14 +426,14 @@ final class CalendarCountdownWindowController: NSWindowController {
 
     private func appendAccessControl(for source: SystemCalendarStore.Source) {
         if source.access == .restricted {
-            appendEmptyRow("系统限制了「\(source.title)」的访问权限")
+            appendEmptyRow(L10n.text("calendar.theSystemRestrictsAccessTo", "系统限制了「{arg1}」的访问权限", ["arg1": String(describing: source.title)]))
             return
         }
 
         if accessError == source && source.access == .notDetermined {
-            appendEmptyRow("无法申请「\(source.title)」访问权限，请重试")
+            appendEmptyRow(L10n.text("calendar.couldNotRequestAccessToTryAgain", "无法申请「{arg1}」访问权限，请重试", ["arg1": String(describing: source.title)]))
         }
-        let label = source.access == .notDetermined ? "允许访问\(source.title)" : "在系统设置中允许访问\(source.title)"
+        let label = source.access == .notDetermined ? L10n.text("calendar.allowAccessTo", "允许访问{arg1}", ["arg1": String(describing: source.title)]) : L10n.text("calendar.allowAccessToInSystemSettings", "在系统设置中允许访问{arg1}", ["arg1": String(describing: source.title)])
         let control = button(label, symbol: "lock", action: #selector(handleSystemAccess(_:)))
         control.tag = SystemCalendarStore.Source.allCases.firstIndex(of: source) ?? 0
         control.isEnabled = !isRequestingAccess
@@ -437,7 +480,7 @@ final class CalendarCountdownWindowController: NSWindowController {
         row.tag = index
         row.alignment = .left
         row.cell?.lineBreakMode = .byTruncatingTail
-        row.toolTip = "\(title) · \(day.month) 月 \(day.day) 日 · \(count)"
+        row.toolTip = L10n.text("calendar.format.102", "{arg1} · {arg2} 月 {arg3} 日 · {arg4}", ["arg1": String(describing: title), "arg2": String(describing: day.month), "arg3": String(describing: day.day), "arg4": String(describing: count)])
         if selected { row.contentTintColor = .controlAccentColor }
         eventList.addArrangedSubview(row)
         row.widthAnchor.constraint(equalTo: eventList.widthAnchor).isActive = true
@@ -458,7 +501,7 @@ final class CalendarCountdownWindowController: NSWindowController {
     }
 
     private func updateEditorButtons() {
-        saveButton.title = selectedID == nil ? "添加事件" : "更新事件"
+        saveButton.title = selectedID == nil ? L10n.text("calendar.addEvent", "添加事件") : L10n.text("calendar.updateEvent", "更新事件")
         deleteButton.isEnabled = selectedID != nil
     }
 
@@ -543,7 +586,7 @@ final class CalendarCountdownWindowController: NSWindowController {
         if lunarYear.numberOfItems == 0 || !lunarYears.contains(year) {
             lunarYears = min(lunarYears.lowerBound, year)...max(lunarYears.upperBound, year)
             lunarYear.removeAllItems()
-            lunarYear.addItems(withTitles: lunarYears.map { "\($0)年" })
+            lunarYear.addItems(withTitles: lunarYears.map { L10n.text("calendar.format.105", "{arg1}年", ["arg1": String(describing: $0)]) })
         }
         lunarYear.selectItem(at: year - lunarYears.lowerBound)
         loadLunarMonths(year: year, gregorian: gregorian)
@@ -565,7 +608,7 @@ final class CalendarCountdownWindowController: NSWindowController {
         let start = lunarMonths[monthIndex]
         guard let range = lunar.range(of: .day, in: .month, for: start) else { return }
         lunarDay.removeAllItems()
-        lunarDay.addItems(withTitles: range.map { "\($0)日" })
+        lunarDay.addItems(withTitles: range.map { L10n.text("calendar.format.106", "{arg1}日", ["arg1": String(describing: $0)]) })
         lunarDay.selectItem(at: min(max(0, preferredDay - 1), range.count - 1))
     }
 
@@ -623,18 +666,18 @@ final class CalendarCountdownWindowController: NSWindowController {
     @objc private func handleSave() {
         guard let manager else { return }
         let title = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { feedback.stringValue = "请输入事件名称。"; return }
+        guard !title.isEmpty else { feedback.stringValue = L10n.text("calendar.enterAnEventName", "请输入事件名称。"); return }
         let day = CountdownDay(date: datePicker.dateValue, calendar: CalendarCountdown.localCalendar)
         let event = CalendarCountdownEvent(id: selectedID ?? UUID(), title: title, day: day,
                                            usesLunarCalendar: dateMode.indexOfSelectedItem == 1)
         do {
             try manager.saveCalendarEvent(event)
             selectedID = event.id
-            feedback.stringValue = "已保存。"
+            feedback.stringValue = L10n.text("calendar.saved", "已保存。")
             updateEditorButtons()
             render()
         } catch {
-            feedback.stringValue = "保存失败，请重试。"
+            feedback.stringValue = L10n.text("calendar.couldNotSaveTheEventTryAgain", "保存失败，请重试。")
         }
     }
 
@@ -643,9 +686,9 @@ final class CalendarCountdownWindowController: NSWindowController {
         do {
             try manager.removeCalendarEvent(id: selectedID)
             startNewEvent()
-            feedback.stringValue = "已删除。"
+            feedback.stringValue = L10n.text("calendar.deleted", "已删除。")
         } catch {
-            feedback.stringValue = "删除失败，请重试。"
+            feedback.stringValue = L10n.text("calendar.couldNotDeleteTheEventTryAgain", "删除失败，请重试。")
         }
     }
 }

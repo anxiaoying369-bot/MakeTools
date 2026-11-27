@@ -4,14 +4,14 @@ private final class CalendarDayButton: NSButton {
     private var isSelectedDay = false
     private var isToday = false
 
-    func update(date: Date, isCurrentMonth: Bool, isSelected: Bool, isToday: Bool, lunar: String, holiday: ChinaHoliday?,
+    func update(date: Date, isCurrentMonth: Bool, isSelected: Bool, isToday: Bool, lunar: String, holiday: CalendarHoliday?,
                 hasEvents: Bool, hasReminders: Bool) {
         self.isSelectedDay = isSelected
         self.isToday = isToday
         let calendar = CalendarCountdown.localCalendar
         let number = String(calendar.component(.day, from: date))
         let muted = NSColor.tertiaryLabelColor
-        let primary: NSColor = isSelected ? .controlAccentColor : (isCurrentMonth ? .labelColor : muted)
+        let primary: NSColor = isSelected ? ToolAppearance.accent : (isCurrentMonth ? .labelColor : muted)
         let secondary = isCurrentMonth ? NSColor.secondaryLabelColor : muted
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
@@ -21,7 +21,7 @@ private final class CalendarDayButton: NSButton {
             .foregroundColor: primary, .paragraphStyle: paragraph
         ])
         if let holiday {
-            let mark = holiday.isOffDay ? " 休" : " 班"
+            let mark = holiday.isOffDay ? L10n.text("calendar.off", " 休") : L10n.text("calendar.work", " 班")
             text.append(NSAttributedString(string: mark, attributes: [
                 .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
                 .foregroundColor: holiday.isOffDay ? NSColor.systemGreen : NSColor.systemOrange
@@ -39,15 +39,15 @@ private final class CalendarDayButton: NSButton {
             ]))
         }
         attributedTitle = text
-        let dateName = DateFormatter.localizedString(from: date, dateStyle: .long, timeStyle: .none)
+        let dateName = date.formatted(.dateTime.year().month(.wide).day().locale(L10n.locale))
         let details = [
-            dateName, lunar, holiday.map { "\($0.name) · \($0.isOffDay ? "休息" : "补班")" } ?? "",
-            hasEvents ? "有日程" : "", hasReminders ? "有未完成待办" : ""
+            dateName, lunar, holiday.map { "\($0.name) · \($0.isOffDay ? L10n.text("calendar.dayOff", "休息") : L10n.text("calendar.makeupDay", "补班"))" } ?? "",
+            hasEvents ? L10n.text("calendar.hasEvents", "有日程") : "", hasReminders ? L10n.text("calendar.hasIncompleteReminders", "有未完成待办") : ""
         ]
             .filter { !$0.isEmpty }.joined(separator: "，")
         toolTip = details
         setAccessibilityLabel(details)
-        setAccessibilityValue(isSelected ? "已选中" : nil)
+        setAccessibilityValue(isSelected ? L10n.text("calendar.selected", "已选中") : nil)
         needsDisplay = true
     }
 
@@ -57,11 +57,11 @@ private final class CalendarDayButton: NSButton {
         super.updateLayer()
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = isSelectedDay
-                ? NSColor.controlAccentColor.withAlphaComponent(0.16).cgColor
-                : NSColor.controlBackgroundColor.withAlphaComponent(0.65).cgColor
+                ? ToolAppearance.tint.cgColor
+                : ToolAppearance.canvas.cgColor
             layer?.borderColor = (isSelectedDay || isToday)
-                ? NSColor.controlAccentColor.withAlphaComponent(isSelectedDay ? 0.78 : 0.4).cgColor
-                : NSColor.clear.cgColor
+                ? ToolAppearance.accent.withAlphaComponent(isSelectedDay ? 0.78 : 0.5).cgColor
+                : ToolAppearance.line.cgColor
         }
     }
 }
@@ -70,15 +70,16 @@ final class CalendarMonthGrid: NSView {
     var onSelectDate: ((Date) -> Void)?
     private var dates: [Date] = []
     private var buttons: [CalendarDayButton] = []
+    private var weekdayLabels: [NSTextField] = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        let weekdayLabels = ["一", "二", "三", "四", "五", "六", "日"].map { name in
-            let label = NSTextField(labelWithString: name)
+        weekdayLabels = (0..<7).map { _ in
+            let label = NSTextField(labelWithString: "")
             label.alignment = .center
             label.font = .systemFont(ofSize: 11, weight: .semibold)
             label.textColor = .secondaryLabelColor
-            return label as NSView
+            return label
         }
 
         let headings = NSStackView(views: weekdayLabels)
@@ -106,7 +107,7 @@ final class CalendarMonthGrid: NSView {
                 button.alignment = .center
                 button.cell?.wraps = true
                 button.wantsLayer = true
-                button.layer?.cornerRadius = 8
+                button.layer?.cornerRadius = 9
                 button.layer?.cornerCurve = .continuous
                 button.layer?.borderWidth = 1
                 button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -132,8 +133,17 @@ final class CalendarMonthGrid: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func update(dates: [Date], month: Date, selected: Date, now: Date, calendar: Calendar, showLunar: Bool,
-                holidays: [CountdownDay: ChinaHoliday], eventDays: Set<CountdownDay>, reminderDays: Set<CountdownDay>) {
+                holidays: [CountdownDay: CalendarHoliday], eventDays: Set<CountdownDay>, reminderDays: Set<CountdownDay>) {
         self.dates = dates
+        let names = [
+            L10n.text("calendar.sun", "日"), L10n.text("calendar.mon", "一"),
+            L10n.text("calendar.tue", "二"), L10n.text("calendar.wed", "三"),
+            L10n.text("calendar.thu", "四"), L10n.text("calendar.fri", "五"),
+            L10n.text("calendar.sat", "六")
+        ]
+        for (date, label) in zip(dates, weekdayLabels) {
+            label.stringValue = names[calendar.component(.weekday, from: date) - 1]
+        }
         let lunarCalendar = CalendarCountdown.lunarCalendar(timeZone: calendar.timeZone)
         for (date, button) in zip(dates, buttons) {
             let day = CountdownDay(date: date, calendar: calendar)

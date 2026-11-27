@@ -5,14 +5,15 @@ public enum ThemeCSS {
     public static let stylesheet: String = """
     :root {
         color-scheme: light dark;
-        --bg: #ffffff;
-        --fg: #172033;
+        --bg: #f0f3f9;
+        --reader-bg: #fff;
+        --fg: #182440;
         --muted: #556177;
         --border: #d5deeb;
         --border-subtle: #e3eaf4;
         --code-bg: #f4f7fb;
         --inline-code-bg: rgba(175, 184, 193, 0.2);
-        --link: #0969da;
+        --link: #2653c7;
         --quote-border: #d0d7de;
         --table-stripe: #f6f8fa;
         --card-bg: #f4f7fb;
@@ -34,7 +35,8 @@ public enum ThemeCSS {
 
     @media (prefers-color-scheme: dark) {
         :root {
-            --bg: #10141d;
+            --bg: #141b2a;
+            --reader-bg: #1b263b;
             --fg: #e7edf8;
             --muted: #a4afc3;
             --border: #344059;
@@ -44,7 +46,7 @@ public enum ThemeCSS {
             --link: #4493f8;
             --quote-border: #3d444d;
             --table-stripe: #161b22;
-            --card-bg: #171e2b;
+            --card-bg: #1b263b;
             --tok-kw: #ff7b72;
             --tok-str: #a5d6ff;
             --tok-cmt: #8b949e;
@@ -82,8 +84,12 @@ public enum ThemeCSS {
 
     .markdown-body {
         max-width: 850px;
-        margin: 0 auto;
-        padding: 34px clamp(18px, 5vw, 42px) 48px;
+        margin: 14px auto 28px;
+        width: calc(100% - 32px);
+        background: var(--reader-bg);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: clamp(22px, 5vw, 40px) clamp(18px, 5vw, 46px) 48px;
     }
 
     @media (prefers-reduced-motion: no-preference) {

@@ -86,6 +86,18 @@ enum CalendarCountdown {
         let digits = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
         guard let month = components.month, (1...12).contains(month),
               let day = components.day, (1...30).contains(day) else { return "" }
+        if L10n.locale.language.languageCode?.identifier != "zh" {
+            let monthArgs = ["month": month.formatted(.number.locale(L10n.locale))]
+            let monthName = components.isLeapMonth == true
+                ? L10n.text("calendar.lunar.leapMonth", "闰{month}月", monthArgs)
+                : L10n.text("calendar.lunar.month", "农历{month}月", monthArgs)
+            if day == 1 && !includingMonth { return monthName }
+            let dayName = L10n.text("calendar.lunar.day", "初{day}",
+                                    ["day": day.formatted(.number.locale(L10n.locale))])
+            return includingMonth
+                ? L10n.text("calendar.lunar.date", "{month}{day}", ["month": monthName, "day": dayName])
+                : dayName
+        }
         let monthName = (components.isLeapMonth == true ? "闰" : "") + months[month - 1] + "月"
         if day == 1 && !includingMonth { return monthName }
 
@@ -100,16 +112,16 @@ enum CalendarCountdown {
         return includingMonth ? monthName + dayName : dayName
     }
 
-    static func monthGrid(containing date: Date, calendar: Calendar) -> [Date] {
+    static func monthGrid(containing date: Date, calendar: Calendar, firstWeekday: Int = 2) -> [Date] {
         guard let monthStart = calendar.dateInterval(of: .month, for: date)?.start else { return [] }
-        let preceding = (calendar.component(.weekday, from: monthStart) + 5) % 7
+        let preceding = (calendar.component(.weekday, from: monthStart) - firstWeekday + 7) % 7
         return (0..<42).compactMap { calendar.date(byAdding: .day, value: $0 - preceding, to: monthStart) }
     }
 
     static func status(for days: Int) -> String {
-        if days < 0 { return "已过去 \(-days) 天" }
-        if days > 0 { return "还有 \(days) 天" }
-        return "就是今天"
+        if days < 0 { return L10n.text("calendar.daysSince", "已过去 {count} 天", ["count": String(describing: -days)]) }
+        if days > 0 { return L10n.text("calendar.daysRemaining", "还有 {count} 天", ["count": String(describing: days)]) }
+        return L10n.text("calendar.today", "就是今天")
     }
 
     static func orderedEvents(

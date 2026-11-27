@@ -113,30 +113,30 @@ public enum AppInstallStatus: Equatable {
     public var badgeText: String {
         switch self {
         case .runningFromApplications:
-            return "已安装"
+            return L10n.text("installation.installed", "已安装")
         case .updateAvailable:
-            return "可更新"
+            return L10n.text("installation.updateAvailable", "可更新")
         case .installedSameOrNewer:
-            return "未从安装目录启动"
+            return L10n.text("installation.runningOutsideTheInstallationFolder", "未从安装目录启动")
         case .translocated:
-            return "运行在隔离路径"
+            return L10n.text("installation.runningFromATranslocatedPath", "运行在隔离路径")
         case .notInstalled:
-            return "未安装"
+            return L10n.text("installation.notInstalled", "未安装")
         }
     }
 
     public var summaryText: String {
         switch self {
         case .runningFromApplications(let appURL, let version):
-            return "当前正从 \(appURL.path) 运行 \(version.displayString)，安装位置正常。"
+            return L10n.text("installation.runningFromTheInstallationLocationIsCorrect", "当前正从 {arg1} 运行 {arg2}，安装位置正常。", ["arg1": String(describing: appURL.path), "arg2": String(describing: version.displayString)])
         case .updateAvailable(let installedURL, let installedVersion, let runningVersion):
-            return "\(installedURL.path) 中已安装旧版本 \(installedVersion.displayString)，当前运行 \(runningVersion.displayString)，建议一键更新。"
+            return L10n.text("installation.anOlderVersionIsInstalledInYou", "{arg1} 中已安装旧版本 {arg2}，当前运行 {arg3}，建议一键更新。", ["arg1": String(describing: installedURL.path), "arg2": String(describing: installedVersion.displayString), "arg3": String(describing: runningVersion.displayString)])
         case .installedSameOrNewer(let installedURL, let installedVersion, _):
-            return "\(installedURL.path) 中已存在 \(installedVersion.displayString)，但当前进程从其他位置启动，建议从「应用程序」打开。"
+            return L10n.text("installation.versionAlreadyExistsInOpenTheCopy", "{arg1} 中已存在 {arg2}，但当前进程从其他位置启动，建议从「应用程序」打开。", ["arg1": String(describing: installedURL.path), "arg2": String(describing: installedVersion.displayString)])
         case .translocated:
-            return "当前应用正运行在 macOS App Translocation 临时只读路径中，移入「应用程序」后才能稳定使用 Quick Look 扩展和开机自启。"
+            return L10n.text("installation.theAppIsRunningFromATemporary", "当前应用正运行在 macOS App Translocation 临时只读路径中，移入「应用程序」后才能稳定使用 Quick Look 扩展和开机自启。")
         case .notInstalled:
-            return "当前未在「应用程序」中检测到 MakeTools.app。安装到 /Applications 后，Quick Look 扩展、系统启动与后续更新都会更稳定。"
+            return L10n.text("installation.maketoolsAppWasNotFoundInApplications", "当前未在「应用程序」中检测到 MakeTools.app。安装到 /Applications 后，Quick Look 扩展、系统启动与后续更新都会更稳定。")
         }
     }
 }
@@ -165,8 +165,8 @@ public struct QuickLookCheckResult: Equatable {
     }
 
     public var badgeText: String {
-        guard hasEmbeddedExtension else { return "缺少扩展" }
-        return registeredForCurrentTarget ? "已提交注册" : "待注册"
+        guard hasEmbeddedExtension else { return L10n.text("installation.extensionMissing", "缺少扩展") }
+        return registeredForCurrentTarget ? L10n.text("installation.registrationSubmitted", "已提交注册") : L10n.text("installation.registrationPending", "待注册")
     }
 }
 
@@ -178,23 +178,23 @@ public enum LoginItemState: Equatable {
 
     public var badgeText: String {
         switch self {
-        case .enabled: return "已开启"
-        case .requiresApproval: return "需系统批准"
-        case .notRegistered: return "未开启"
-        case .notFound: return "需先安装"
+        case .enabled: return L10n.text("installation.enabled", "已开启")
+        case .requiresApproval: return L10n.text("installation.systemApprovalRequired", "需系统批准")
+        case .notRegistered: return L10n.text("installation.disabled", "未开启")
+        case .notFound: return L10n.text("installation.installFirst", "需先安装")
         }
     }
 
     public var detailText: String {
         switch self {
         case .enabled:
-            return "MakeTools 已加入系统登录项，开机登录后会自动启动。"
+            return L10n.text("installation.maketoolsIsALoginItemAndWill", "MakeTools 已加入系统登录项，开机登录后会自动启动。")
         case .requiresApproval:
-            return "已请求开机自启，请前往「系统设置 → 通用 → 登录项与扩展」允许 MakeTools。"
+            return L10n.text("installation.launchAtLoginWasRequestedAllowMaketools", "已请求开机自启，请前往「系统设置 → 通用 → 登录项与扩展」允许 MakeTools。")
         case .notRegistered:
-            return "当前未启用开机自动启动，可随时通过下方开关开启。"
+            return L10n.text("installation.launchAtLoginIsCurrentlyOffUse", "当前未启用开机自动启动，可随时通过下方开关开启。")
         case .notFound:
-            return "请先将 MakeTools 安装并从「应用程序」启动，再开启开机自动启动。"
+            return L10n.text("installation.installMaketoolsAndLaunchItFromApplications", "请先将 MakeTools 安装并从「应用程序」启动，再开启开机自动启动。")
         }
     }
 }
@@ -211,9 +211,9 @@ public struct InstallationProgressSummary: Equatable {
 
     public var title: String {
         if completedSteps >= totalSteps {
-            return "所有推荐安装步骤已就绪"
+            return L10n.text("installation.allRecommendedSetupStepsAreComplete", "所有推荐安装步骤已就绪")
         }
-        return "已完成 \(completedSteps) / \(totalSteps) 项核心准备"
+        return L10n.text("installation.setupStepsCompleted", "已完成 {arg1} / {arg2} 项核心准备", ["arg1": String(describing: completedSteps), "arg2": String(describing: totalSteps)])
     }
 }
 
@@ -367,7 +367,7 @@ public enum InstallationInspector {
         }
         let displayName = (dict["CFBundleDisplayName"] as? String)
             ?? (dict["CFBundleName"] as? String)
-            ?? "MakeTools Markdown 预览"
+            ?? L10n.text("installation.maketoolsMarkdownPreview", "MakeTools Markdown 预览")
         let build = dict["CFBundleVersion"] as? String
         return QuickLookExtensionInfo(
             bundleIdentifier: bundleID,
@@ -430,7 +430,7 @@ public enum InstallationInspector {
 
     public static func currentArchitectureLabel() -> String {
         #if arch(arm64)
-        return "arm64（Apple 芯片）"
+        return L10n.text("installation.arm64AppleSilicon", "arm64（Apple 芯片）")
         #elseif arch(x86_64)
         return "x86_64（Intel）"
         #else
@@ -495,13 +495,13 @@ public enum AppBundleInstallError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .sourceBundleInvalid(let path):
-            return "当前应用包路径无效：\(path)"
+            return L10n.text("installation.invalidAppBundlePath", "当前应用包路径无效：{arg1}", ["arg1": String(describing: path)])
         case .destinationNotDirectory(let path):
-            return "所选安装位置不是有效文件夹：\(path)"
+            return L10n.text("installation.theSelectedInstallationLocationIsNotA", "所选安装位置不是有效文件夹：{arg1}", ["arg1": String(describing: path)])
         case .destinationInsideSource:
-            return "不能将应用安装到其自身目录内部，请选择「应用程序」文件夹。"
+            return L10n.text("installation.theAppCannotBeInstalledInsideIts", "不能将应用安装到其自身目录内部，请选择「应用程序」文件夹。")
         case .copyFailed(let reason):
-            return "复制应用包失败：\(reason)"
+            return L10n.text("installation.couldNotCopyTheAppBundle", "复制应用包失败：{arg1}", ["arg1": String(describing: reason)])
         }
     }
 }
@@ -649,7 +649,7 @@ public final class InstallationService {
             .appendingPathComponent(InstallationInspector.quickLookExtensionName, isDirectory: true)
             .standardizedFileURL.resolvingSymlinksInPath()
         guard FileManager.default.fileExists(atPath: extURL.path) else {
-            return RegistrationOutcome(succeeded: false, steps: [], warning: "应用包内未找到 Markdown 快速预览扩展")
+            return RegistrationOutcome(succeeded: false, steps: [], warning: L10n.text("installation.theMarkdownQuickLookExtensionIsMissing", "应用包内未找到 Markdown 快速预览扩展"))
         }
 
         let pluginKit = "/usr/bin/pluginkit"
@@ -670,13 +670,13 @@ public final class InstallationService {
         _ = runCommand(pluginKit, arguments: ["-a", extURL.path])
         _ = runCommand(pluginKit, arguments: ["-e", "use"] + match)
         guard isEnabled() else {
-            return RegistrationOutcome(succeeded: false, steps: [], warning: "系统未启用当前应用的 Markdown 快速预览扩展")
+            return RegistrationOutcome(succeeded: false, steps: [], warning: L10n.text("installation.theCurrentAppSMarkdownQuickLook", "系统未启用当前应用的 Markdown 快速预览扩展"))
         }
 
         _ = runCommand("/usr/bin/qlmanage", arguments: ["-r"])
         let version = InstallationInspector.readBundleVersion(at: appURL) ?? AppVersion(shortVersion: "1.1.0")
         preferences.recordQuickLookRegistration(appURL: appURL, version: version)
-        return RegistrationOutcome(succeeded: true, steps: ["已启用 Markdown 快速预览扩展"], warning: nil)
+        return RegistrationOutcome(succeeded: true, steps: [L10n.text("installation.theMarkdownQuickLookExtensionIsEnabled", "已启用 Markdown 快速预览扩展")], warning: nil)
     }
 
     private struct CommandResult {
@@ -691,7 +691,7 @@ public final class InstallationService {
         timeout: TimeInterval = 10
     ) -> CommandResult {
         guard FileManager.default.isExecutableFile(atPath: executablePath) else {
-            return CommandResult(exitCode: -1, stdout: "", stderr: "未找到可执行文件：\(executablePath)")
+            return CommandResult(exitCode: -1, stdout: "", stderr: L10n.text("installation.executableNotFound", "未找到可执行文件：{arg1}", ["arg1": String(describing: executablePath)]))
         }
 
         let process = Process()
@@ -733,7 +733,7 @@ public final class InstallationService {
         if exitSemaphore.wait(timeout: .now() + timeout) == .timedOut {
             process.terminate()
             _ = exitSemaphore.wait(timeout: .now() + 1)
-            return CommandResult(exitCode: -2, stdout: "", stderr: "命令执行超时")
+            return CommandResult(exitCode: -2, stdout: "", stderr: L10n.text("installation.commandTimedOut", "命令执行超时"))
         }
 
         readGroup.wait()

@@ -2,6 +2,35 @@ import AppKit
 import QuartzCore
 
 enum ToolAppearance {
+    static let canvas = adaptive(light: 0xf0f3f9, dark: 0x141b2a)
+    static let rail = adaptive(light: 0xe7edf8, dark: 0x101829)
+    static let surface = adaptive(light: 0xffffff, dark: 0x1b263b)
+    static let line = adaptive(light: 0xd9e2f1, dark: 0x31425c)
+    static let accent = adaptive(light: 0x2653c7, dark: 0xa1b7ff)
+    static let tint = adaptive(light: 0xe1eaff, dark: 0x263a66)
+
+    private static func adaptive(light: Int, dark: Int) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let color = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+            return NSColor(srgbRed: CGFloat((color >> 16) & 255) / 255,
+                           green: CGFloat((color >> 8) & 255) / 255,
+                           blue: CGFloat(color & 255) / 255, alpha: 1)
+        }
+    }
+
+    static func section(_ content: NSView, fill: NSColor = surface, inset: CGFloat = 16) -> NSView {
+        let card = ToolSurfaceView(fill: fill)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: card.topAnchor, constant: inset),
+            content.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: inset),
+            content.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -inset),
+            content.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -inset)
+        ])
+        return card
+    }
+
     static var allowsMotion: Bool {
         !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
@@ -29,16 +58,8 @@ enum ToolAppearance {
     }
 
     static func tile(_ name: String, side: CGFloat, size: CGFloat) -> NSView {
-        let tile = ToolSurfaceView(
-            fill: NSColor(name: nil) { appearance in
-                let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                return .controlAccentColor.withAlphaComponent(dark ? 0.20 : 0.12)
-            },
-            radius: side * 0.26,
-            border: nil
-        )
-        let iconView = icon(name, size: size)
-        tile.translatesAutoresizingMaskIntoConstraints = false
+        let tile = ToolSurfaceView(fill: tint, radius: side * 0.28, border: nil)
+        let iconView = icon(name, size: size, tint: accent)
         iconView.translatesAutoresizingMaskIntoConstraints = false
         tile.addSubview(iconView)
         NSLayoutConstraint.activate([
@@ -52,6 +73,7 @@ enum ToolAppearance {
 
     static func configure(_ button: NSButton, symbol: String) {
         button.bezelStyle = .rounded
+        button.font = .systemFont(ofSize: 12, weight: .medium)
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 12, weight: .medium))
         button.imagePosition = .imageLeading
@@ -59,7 +81,9 @@ enum ToolAppearance {
 
     static func header(title: String, subtitle: String, symbol: String) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 28, weight: .bold)
+        titleLabel.font = .systemFont(ofSize: 29, weight: .semibold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.isSelectable = true
 
         let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
@@ -74,11 +98,17 @@ enum ToolAppearance {
         labels.spacing = 4
         subtitleLabel.widthAnchor.constraint(equalTo: labels.widthAnchor).isActive = true
 
-        let header = NSStackView(views: [tile(symbol, side: 46, size: 21), labels])
+        let marker = ToolSurfaceView(fill: accent, radius: 2, border: nil)
+        marker.widthAnchor.constraint(equalToConstant: 3).isActive = true
+        marker.heightAnchor.constraint(equalToConstant: 38).isActive = true
+        let glyph = tile(symbol, side: 51, size: 23)
+        let header = NSStackView(views: [marker, labels, glyph])
         header.orientation = .horizontal
         header.alignment = .centerY
         header.spacing = 14
-        return header
+        labels.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
+        glyph.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return section(header, inset: 18)
     }
 
     static func documentToolbar(
@@ -97,41 +127,39 @@ enum ToolAppearance {
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
 
-        let iconTile = tile("doc.richtext", side: 32, size: 15)
-        let toolbar = NSView()
+        let titles = NSStackView(views: [filename, context])
+        titles.orientation = .vertical
+        titles.alignment = .leading
+        titles.spacing = 2
+        titles.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
+        for label in [filename, context] {
+            label.widthAnchor.constraint(equalTo: titles.widthAnchor).isActive = true
+        }
+        let heading = NSStackView(views: [tile("doc.richtext", side: 34, size: 16), titles])
+        heading.orientation = .horizontal
+        heading.alignment = .centerY
+        heading.spacing = 11
+
+        let actions = NSStackView(views: buttons)
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 7
+
+        let stack = NSStackView(views: [heading, actions])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let toolbar = ToolSurfaceView(fill: surface, radius: 0, border: nil)
         toolbar.translatesAutoresizingMaskIntoConstraints = false
-        for subview in [iconTile, filename, context] {
-            subview.translatesAutoresizingMaskIntoConstraints = false
-            toolbar.addSubview(subview)
-        }
-        var trailingAnchor = toolbar.trailingAnchor
-        var spacing = insets.right
-        for button in buttons {
-            button.translatesAutoresizingMaskIntoConstraints = false
-            button.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-            toolbar.addSubview(button)
-        }
-        for button in buttons.reversed() {
-            NSLayoutConstraint.activate([
-                button.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -spacing),
-                button.centerYAnchor.constraint(equalTo: iconTile.centerYAnchor)
-            ])
-            trailingAnchor = button.leadingAnchor
-            spacing = 9
-        }
-
+        toolbar.addSubview(stack)
         NSLayoutConstraint.activate([
-            iconTile.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: insets.left),
-            iconTile.topAnchor.constraint(equalTo: toolbar.topAnchor, constant: insets.top),
-            iconTile.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: -insets.bottom),
-
-            filename.leadingAnchor.constraint(equalTo: iconTile.trailingAnchor, constant: 9),
-            filename.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            filename.bottomAnchor.constraint(equalTo: iconTile.centerYAnchor, constant: 1),
-
-            context.leadingAnchor.constraint(equalTo: filename.leadingAnchor),
-            context.trailingAnchor.constraint(equalTo: filename.trailingAnchor),
-            context.topAnchor.constraint(equalTo: filename.bottomAnchor, constant: 2)
+            stack.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: insets.left),
+            stack.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -insets.right),
+            stack.topAnchor.constraint(equalTo: toolbar.topAnchor, constant: insets.top),
+            stack.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: -insets.bottom),
+            heading.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            actions.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor)
         ])
         return toolbar
     }
@@ -147,8 +175,7 @@ enum ToolAppearance {
     }
 
     static func sectionTitle(_ title: String, symbol: String) -> NSView {
-        let image = icon(symbol, size: 14)
-        image.widthAnchor.constraint(equalToConstant: 19).isActive = true
+        let image = tile(symbol, side: 26, size: 12)
         let label = NSTextField(wrappingLabelWithString: title)
         label.font = .systemFont(ofSize: 15, weight: .semibold)
         label.isSelectable = true
@@ -166,7 +193,7 @@ final class ToolSurfaceView: NSView {
     private let radius: CGFloat
     private let border: NSColor?
 
-    init(fill: NSColor = .controlBackgroundColor, radius: CGFloat = 14, border: NSColor? = .separatorColor) {
+    init(fill: NSColor = ToolAppearance.surface, radius: CGFloat = 16, border: NSColor? = ToolAppearance.line) {
         self.fill = fill
         self.radius = radius
         self.border = border

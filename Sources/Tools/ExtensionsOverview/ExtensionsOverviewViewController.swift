@@ -2,8 +2,8 @@ import AppKit
 
 public final class ExtensionsOverviewTool: ToolModule {
     public let id = "extensions-overview"
-    public let title = "系统扩展"
-    public let subtitle = "Quick Look 与扩展指南"
+    public let title = L10n.text("extensions.systemExtensions", "系统扩展")
+    public let subtitle = L10n.text("extensions.quickLookAndExtensionGuide", "Quick Look 与扩展指南")
     public let symbolName = "puzzlepiece.extension"
 
     public init() {}
@@ -33,45 +33,36 @@ public final class ExtensionsOverviewViewController: NSViewController {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 14
+        stack.spacing = 16
         stack.edgeInsets = NSEdgeInsets(top: 30, left: 32, bottom: 36, right: 32)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         let header = ToolAppearance.header(
-            title: "系统扩展",
-            subtitle: "在访达中预览 Markdown，或了解如何为 MakeTools 添加新工具。",
+            title: L10n.text("extensions.systemExtensions", "系统扩展"),
+            subtitle: L10n.text("extensions.previewMarkdownInFinderOrLearnTo", "在访达中预览 Markdown，或了解如何为 MakeTools 添加新工具。"),
             symbol: "puzzlepiece.extension"
         )
 
         let extCard = makeCard(
-            title: "Markdown 快速预览",
+            title: L10n.text("extensions.markdownQuickLook", "Markdown 快速预览"),
             symbol: "doc.richtext",
             badge: "com.make.MakeTools.MarkdownQuickLook",
-            body: """
-            • 支持类型：.md / .markdown / .mdown / .mkd / .mdx（net.daringfireball.markdown）
-            • 预览模式：AppKit 原生渲染，随系统切换浅色与深色外观
-            • 复制能力：代码块右上角一键复制、工具栏「复制 Markdown / 纯文本」、划词 Cmd+C
-            • 使用方式：在访达（Finder）中选中任意 Markdown 文件并按下空格键
-            """,
-            buttonTitle: "打开系统扩展设置",
+            body: L10n.text("extensions.fileTypesMdMarkdownMdownMkdMdx", "• 支持类型：.md / .markdown / .mdown / .mkd / .mdx（net.daringfireball.markdown）\n• 预览模式：AppKit 原生渲染，随系统切换浅色与深色外观\n• 复制能力：代码块右上角一键复制、工具栏「复制 Markdown / 纯文本」、划词 Cmd+C\n• 使用方式：在访达（Finder）中选中任意 Markdown 文件并按下空格键"),
+            buttonTitle: L10n.text("extensions.openExtensionSettings", "打开系统扩展设置"),
             buttonAction: #selector(openSystemExtensions(_:))
         )
 
         let guideCard = makeCard(
-            title: "添加工具模块",
+            title: L10n.text("extensions.addAToolModule", "添加工具模块"),
             symbol: "hammer",
             badge: "Sources/Tools/<YourTool>/",
-            body: """
-            1. 在 Sources/Tools/ 下新建模块目录并实现 ToolModule 协议
-            2. 在 Sources/Core/ToolModule.swift 的 ToolRegistry.defaultTools() 中注册新工具
-            3. 如需新的系统扩展（Quick Look、Finder 同步、分享菜单等），在 Sources/Extensions/ 下添加对应 .appex 并在 scripts/build.sh 中打包签名
-            """,
+            body: L10n.text("extensions.1AddAModuleUnderSourcesTools", "1. 在 Sources/Tools/ 下新建模块目录并实现 ToolModule 协议\n2. 在 Sources/Core/ToolModule.swift 的 ToolRegistry.defaultTools() 中注册新工具\n3. 如需新的系统扩展（Quick Look、Finder 同步、分享菜单等），在 Sources/Extensions/ 下添加对应 .appex 并在 scripts/build.sh 中打包签名"),
             buttonTitle: nil,
             buttonAction: nil
         )
 
         stack.addArrangedSubview(header)
-        stack.setCustomSpacing(24, after: header)
+        stack.setCustomSpacing(18, after: header)
         stack.addArrangedSubview(extCard)
         stack.addArrangedSubview(guideCard)
 
@@ -104,7 +95,7 @@ public final class ExtensionsOverviewViewController: NSViewController {
         buttonTitle: String?,
         buttonAction: Selector?
     ) -> NSView {
-        let card = ToolSurfaceView()
+        let card = ToolSurfaceView(fill: buttonAction == nil ? ToolAppearance.surface : ToolAppearance.tint)
         card.translatesAutoresizingMaskIntoConstraints = false
 
         let inner = NSStackView()

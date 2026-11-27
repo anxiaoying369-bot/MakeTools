@@ -10,6 +10,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController, NSU
     private var copyPlainTextButton: NSButton?
     private var currentMarkdown: String = ""
     private var keyDownMonitor: Any?
+    private var previewRequest = UUID()
 
     override var nibName: NSNib.Name? { nil }
     override var acceptsFirstResponder: Bool { true }
@@ -25,15 +26,15 @@ final class PreviewViewController: NSViewController, QLPreviewingController, NSU
         preferredContentSize = NSSize(width: 860, height: 1000)
 
         let label = NSTextField(labelWithString: "Markdown")
-        let context = NSTextField(labelWithString: "快速预览")
+        let context = NSTextField(labelWithString: L10n.text("quickLook.quickLook", "快速预览"))
         fileLabel = label
 
-        let mdButton = NSButton(title: "复制 Markdown", target: self, action: #selector(copyMarkdown(_:)))
+        let mdButton = NSButton(title: L10n.text("quickLook.copyMarkdown", "复制 Markdown"), target: self, action: #selector(copyMarkdown(_:)))
         mdButton.controlSize = .small
         ToolAppearance.configureCopy(mdButton, symbol: "doc.on.doc")
         self.copyMarkdownButton = mdButton
 
-        let textButton = NSButton(title: "复制纯文本", target: self, action: #selector(copyPlainText(_:)))
+        let textButton = NSButton(title: L10n.text("quickLook.copyPlainText", "复制纯文本"), target: self, action: #selector(copyPlainText(_:)))
         textButton.controlSize = .small
         ToolAppearance.configureCopy(textButton, symbol: "text.alignleft")
         self.copyPlainTextButton = textButton
@@ -99,26 +100,28 @@ final class PreviewViewController: NSViewController, QLPreviewingController, NSU
     }
 
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            do {
-                let markdown = try Self.readMarkdown(at: url)
-                let title = url.lastPathComponent
-
-                DispatchQueue.main.async {
-                    guard let self else {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { handler(nil); return }
+            let request = UUID()
+            self.previewRequest = request
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let result = Result { try Self.readMarkdown(at: url) }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, previewRequest == request else {
                         handler(nil)
                         return
                     }
-                    self.loadViewIfNeeded()
-                    self.currentMarkdown = markdown
-                    self.fileLabel?.stringValue = title
-                    self.fileLabel?.toolTip = url.path
-                    self.markdownView?.render(markdown: markdown)
-                    handler(nil)
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    handler(error)
+                    switch result {
+                    case .success(let markdown):
+                        loadViewIfNeeded()
+                        currentMarkdown = markdown
+                        fileLabel?.stringValue = url.lastPathComponent
+                        fileLabel?.toolTip = url.path
+                        markdownView?.render(markdown: markdown)
+                        handler(nil)
+                    case .failure(let error):
+                        handler(error)
+                    }
                 }
             }
         }
@@ -141,7 +144,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController, NSU
     @objc private func copyMarkdown(_ sender: Any?) {
         ClipboardHelper.copyText(currentMarkdown)
         if let button = copyMarkdownButton {
-            ClipboardHelper.flashButton(button, restoreTitle: "复制 Markdown")
+            ClipboardHelper.flashButton(button, restoreTitle: L10n.text("quickLook.copyMarkdown", "复制 Markdown"))
         }
     }
 
@@ -149,7 +152,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController, NSU
         let plainText = MarkdownRenderer.renderPlainText(currentMarkdown)
         ClipboardHelper.copyText(plainText)
         if let button = copyPlainTextButton {
-            ClipboardHelper.flashButton(button, restoreTitle: "复制纯文本")
+            ClipboardHelper.flashButton(button, restoreTitle: L10n.text("quickLook.copyPlainText", "复制纯文本"))
         }
     }
 

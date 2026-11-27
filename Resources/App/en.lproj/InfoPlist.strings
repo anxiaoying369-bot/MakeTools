@@ -1,0 +1,2 @@
+NSCalendarsFullAccessUsageDescription = "MakeTools reads system calendar events and shows them in your MakeTools calendar.";
+NSRemindersFullAccessUsageDescription = "MakeTools reads incomplete reminders and shows them in your MakeTools calendar.";

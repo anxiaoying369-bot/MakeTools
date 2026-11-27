@@ -99,11 +99,11 @@ struct PasswordBookStore {
         var errorDescription: String? {
             switch self {
             case .invalidItem:
-                return "无法读取或保存这条密码记录。"
+                return L10n.text("passwords.couldNotReadOrSaveThePassword", "无法读取或保存这条密码记录。")
             case .keychain(errSecItemNotFound):
-                return "这条记录已不在钥匙串中。"
+                return L10n.text("passwords.thisEntryIsNoLongerInThe", "这条记录已不在钥匙串中。")
             case .keychain(let status):
-                return "无法访问钥匙串（\(status)）。"
+                return L10n.text("passwords.couldNotAccessTheKeychain", "无法访问钥匙串（{arg1}）。", ["arg1": String(describing: status)])
             }
         }
     }

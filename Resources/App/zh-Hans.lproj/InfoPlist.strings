@@ -1,0 +1,2 @@
+NSCalendarsFullAccessUsageDescription = "MakeTools 读取系统日历中的日程并显示在应用日历中。";
+NSRemindersFullAccessUsageDescription = "MakeTools 读取提醒事项中的未完成待办并显示在应用日历中。";

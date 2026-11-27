@@ -25,6 +25,7 @@ public final class DynamicIslandManager {
 
     private enum DefaultsKey {
         static let isEnabled = "MakeTools.DynamicIsland.isEnabled"
+        static let material = "MakeTools.DynamicIsland.material"
         static let style = "MakeTools.DynamicIsland.style"
         static let expandedLayout = "MakeTools.DynamicIsland.expandedLayout"
         static let expandedCardOrder = "MakeTools.DynamicIsland.expandedCardOrder"
@@ -50,10 +51,20 @@ public final class DynamicIslandManager {
         }
     }
 
+    var material: DynamicIslandMaterial {
+        didSet {
+            guard material != oldValue else { return }
+            UserDefaults.standard.set(material.rawValue, forKey: DefaultsKey.material)
+            windowController?.applyMaterial(material)
+            notifyUpdated()
+        }
+    }
+
     public var style: DynamicIslandStyle {
         didSet {
+            guard style != oldValue else { return }
             UserDefaults.standard.set(style.rawValue, forKey: DefaultsKey.style)
-            windowController?.syncState(animated: true)
+            windowController?.syncState(animated: false)
             notifyUpdated()
         }
     }
@@ -65,38 +76,27 @@ public final class DynamicIslandManager {
     private let calendarStore = CalendarCountdownStore()
     private(set) var expandedNotice: (title: String, detail: String)?
 
-    func setExpandedLayout(_ layout: IslandExpandedLayout) {
-        updateExpandedLayout(layout, order: expandedCardOrder)
+    private var layoutEditor: IslandLayoutEditor?
+
+    var layoutDraft: IslandLayoutDraft {
+        IslandLayoutDraft(layout: expandedLayout, order: expandedCardOrder, hidden: hiddenExpandedCards)
     }
 
-    func moveExpandedCard(_ card: IslandExpandedCard, by offset: Int) {
-        let movable = expandedCardOrder.indices.filter { expandedLayout == .grid || expandedCardOrder[$0] != .shelf }
-        guard let step = movable.firstIndex(where: { expandedCardOrder[$0] == card }),
-              movable.indices.contains(step + offset) else { return }
-        var order = expandedCardOrder
-        order.swapAt(movable[step], movable[step + offset])
-        updateExpandedLayout(expandedLayout, order: order)
-    }
-
-    func moveExpandedCard(_ card: IslandExpandedCard, onto target: IslandExpandedCard) {
-        let cards = activeExpandedCards
-        guard card != target, cards.contains(card), cards.contains(target) else { return }
-        if expandedLayout != .grid && (card == .shelf || target == .shelf) {
-            setExpandedLayout(expandedLayout == .shelfRight ? .shelfLeft : .shelfRight)
-        } else {
-            updateExpandedLayout(expandedLayout, order: IslandExpandedCard.moving(card, onto: target, in: expandedCardOrder))
+    func openLayoutEditor(from anchor: NSView?) {
+        if let layoutEditor, layoutEditor.window?.isVisible == true {
+            layoutEditor.window?.makeKeyAndOrderFront(nil)
+            return
         }
+        let editor = IslandLayoutEditor(manager: self)
+        layoutEditor = editor
+        editor.show(from: anchor)
     }
 
-    func setExpandedCardHidden(_ card: IslandExpandedCard, hidden: Bool) {
-        var cards = hiddenExpandedCards
-        if hidden { cards.insert(card) } else { cards.remove(card) }
-        if card == .shelf && hidden { endExternalFileDrag(shouldCollapseIfNeeded: false) }
-        updateExpandedLayout(expandedLayout, order: expandedCardOrder, hidden: cards)
-    }
-
-    func resetExpandedLayout() {
-        updateExpandedLayout(.shelfRight, order: IslandExpandedCard.allCases, hidden: [])
+    func applyLayoutDraft(_ draft: IslandLayoutDraft) {
+        if draft.hidden.contains(.shelf) && !hiddenExpandedCards.contains(.shelf) {
+            endExternalFileDrag(shouldCollapseIfNeeded: false)
+        }
+        updateExpandedLayout(draft.layout, order: draft.order, hidden: draft.hidden)
     }
 
     private func updateExpandedLayout(
@@ -240,6 +240,7 @@ public final class DynamicIslandManager {
         case .shelf: return isFeatureEnabled(.fileShelf)
         case .calendar: return isFeatureEnabled(.calendarCountdown)
         case .bookmarks: return isFeatureEnabled(.webBookmarks)
+        case .lanTransfer: return isFeatureEnabled(.lanTransfer)
         }
     }
 
@@ -251,6 +252,9 @@ public final class DynamicIslandManager {
     private var collapsedMetricRotation = CollapsedMetricRotation()
     private var windowController: DynamicIslandWindowController?
     private var tickTimer: Timer?
+    private var focusTickTimer: Timer?
+    private var focusDeadline: ContinuousClock.Instant?
+    private var pendingLanguageRefresh = false
     private var hudDismissWorkItem: DispatchWorkItem?
     private var dragAutoCollapseWorkItem: DispatchWorkItem?
     private var lastPasteboardChangeCount: Int
@@ -269,6 +273,7 @@ public final class DynamicIslandManager {
         }
         self.isEnabled = defaults.bool(forKey: DefaultsKey.isEnabled)
 
+        material = DynamicIslandMaterial.restored(defaults.string(forKey: DefaultsKey.material))
         let rawStyle = defaults.integer(forKey: DefaultsKey.style)
         self.style = DynamicIslandStyle(rawValue: rawStyle) ?? .auto
         let savedLayout = defaults.string(forKey: DefaultsKey.expandedLayout) ?? ""
@@ -355,6 +360,7 @@ public final class DynamicIslandManager {
                 _ = keepAwakeController.setActive(false)
             } else if feature == .focusTimer {
                 focusTimer.pause()
+                syncFocusTicker()
             } else if feature == .fileShelf {
                 endExternalFileDrag(shouldCollapseIfNeeded: false)
             }
@@ -392,11 +398,11 @@ public final class DynamicIslandManager {
     var collapsedStatusText: String? {
         let leftText: String?
         if isFeatureEnabled(.focusTimer), focusTimer.isRunning {
-            leftText = "专注 \(focusTimer.formattedRemaining)"
+            leftText = L10n.text("island.focus", "专注 {arg1}", ["arg1": String(describing: focusTimer.formattedRemaining)])
         } else if isFeatureEnabled(.keepAwake), isKeepAwakeActive {
-            leftText = "防休眠中"
+            leftText = L10n.text("island.keepingAwake", "防休眠中")
         } else if isFeatureEnabled(.fileShelf), !droppedFiles.isEmpty {
-            leftText = "\(droppedFiles.count) 项暂存"
+            leftText = L10n.text("island.staged", "{count} 项暂存", ["count": String(describing: droppedFiles.count)])
         } else if showCollapsedCustomTitle {
             let trimmed = collapsedCustomTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             leftText = trimmed.isEmpty ? nil : trimmed
@@ -425,7 +431,21 @@ public final class DynamicIslandManager {
         isEnabled = enabled
     }
 
+    func reloadLocalizedInterface() {
+        guard let previous = windowController else { return }
+        pendingLanguageRefresh = previous.hasOpenEditor
+        guard !pendingLanguageRefresh else { return }
+        previous.hideIsland()
+        windowController = DynamicIslandWindowController(manager: self)
+        if isEnabled { windowController?.showIsland() }
+        windowController?.refreshContents()
+    }
+
     public func shutdown() {
+        layoutEditor?.close()
+        layoutEditor = nil
+        focusTimer.pause()
+        syncFocusTicker()
         _ = keepAwakeController.setActive(false)
         stopLoopAndWindow()
     }
@@ -518,8 +538,9 @@ public final class DynamicIslandManager {
             // A previous Finder drag can leave its file URLs on this pasteboard.
             fileDragGesture.mouseDown(pasteboardChangeCount: NSPasteboard(name: .drag).changeCount)
         case .leftMouseDragged:
-            guard isEnabled, dragToExpand, isFileShelfVisible,
-                  !isInternalDragInProgress, !isExternalFileDragActive else { return }
+            guard isEnabled, dragToExpand, isFeatureEnabled(.fileShelf),
+                  !isInternalDragInProgress, !isExternalFileDragActive,
+                  windowController?.isPointerOverPill == true else { return }
 
             let dragPasteboard = NSPasteboard(name: .drag)
             if fileDragGesture.detectsFileDrag(
@@ -691,8 +712,8 @@ public final class DynamicIslandManager {
         if keepAwakeController.setActive(target) {
             if state != .expanded {
                 showHUD(
-                    title: target ? "防休眠已开启" : "防休眠已关闭",
-                    detail: target ? "屏幕将保持常亮" : "恢复系统息屏策略",
+                    title: target ? L10n.text("island.keepAwakeOn", "防休眠已开启") : L10n.text("island.keepAwakeOff", "防休眠已关闭"),
+                    detail: target ? L10n.text("island.theDisplayWillStayOn", "屏幕将保持常亮") : L10n.text("island.normalDisplaySleepRestored", "恢复系统息屏策略"),
                     symbolName: "cup.and.saucer.fill",
                     duration: 2.0
                 )
@@ -705,19 +726,60 @@ public final class DynamicIslandManager {
 
     public func setFocusDuration(minutes: Int) {
         focusTimer.setDuration(minutes: minutes)
+        syncFocusTicker()
         windowController?.refreshContents()
         notifyUpdated()
     }
 
     public func toggleFocusTimer() {
+        guard isFeatureEnabled(.focusTimer) else { return }
+        if focusTimer.isRunning {
+            updateFocusTimer()
+            if !focusTimer.isRunning { return }
+        }
         focusTimer.toggle()
+        syncFocusTicker()
         windowController?.refreshContents()
         notifyUpdated()
     }
 
     public func resetFocusTimer() {
         focusTimer.reset()
+        syncFocusTicker()
         windowController?.refreshContents()
+        notifyUpdated()
+    }
+
+    private func syncFocusTicker() {
+        if !focusTimer.isRunning {
+            focusDeadline = nil
+            focusTickTimer?.invalidate()
+            focusTickTimer = nil
+        } else if focusTickTimer == nil {
+            focusDeadline = ContinuousClock.now.advanced(by: .seconds(focusTimer.remainingSeconds))
+            let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in self?.updateFocusTimer() }
+            timer.tolerance = 0.04
+            RunLoop.main.add(timer, forMode: .common)
+            focusTickTimer = timer
+        }
+    }
+
+    private func updateFocusTimer() {
+        guard let focusDeadline, focusTimer.isRunning else { return }
+        let timeLeft = ContinuousClock.now.duration(to: focusDeadline).components
+        let remaining = max(0, Int(timeLeft.seconds) + (timeLeft.attoseconds > 0 ? 1 : 0))
+        let elapsed = focusTimer.remainingSeconds - remaining
+        guard elapsed > 0 else { return }
+        if focusTimer.tick(elapsedSeconds: elapsed) {
+            syncFocusTicker()
+            NSSound(named: "Glass")?.play()
+            if isEnabled {
+                showHUD(title: L10n.text("island.focusSessionComplete", "专注完成"),
+                        detail: L10n.text("island.takeABreak", "休息一下吧"),
+                        symbolName: "checkmark.circle.fill", duration: 3.5)
+            }
+        }
+        if isEnabled { windowController?.refreshContents() }
         notifyUpdated()
     }
 
@@ -743,8 +805,8 @@ public final class DynamicIslandManager {
         windowController?.refreshContents()
 
         if addedCount > 0 && state != .expanded {
-            let name = urls.first?.lastPathComponent ?? "文件"
-            showHUD(title: "已暂存 \(addedCount) 项", detail: name, symbolName: "tray.and.arrow.down.fill", duration: 2.4)
+            let name = urls.first?.lastPathComponent ?? L10n.text("menu.file", "文件")
+            showHUD(title: L10n.text("island.filesJustStaged", "已暂存 {count} 项", ["count": String(describing: addedCount)]), detail: name, symbolName: "tray.and.arrow.down.fill", duration: 2.4)
         }
         notifyUpdated()
     }
@@ -777,6 +839,8 @@ public final class DynamicIslandManager {
         if droppedFiles.isEmpty {
             selectedFileIndex = 0
         } else {
+            // Keep the same selected file when an earlier slot shifts left.
+            if index < selectedFileIndex { selectedFileIndex -= 1 }
             selectedFileIndex = min(selectedFileIndex, droppedFiles.count - 1)
         }
         windowController?.refreshContents()
@@ -860,6 +924,9 @@ public final class DynamicIslandManager {
     // MARK: - 1s Ticker & Smart Alerts
 
     private func handleTick() {
+        if pendingLanguageRefresh, windowController?.hasOpenEditor == false {
+            reloadLocalizedInterface()
+        }
         if (NSEvent.pressedMouseButtons & 1) == 0 {
             finishMouseDrag()
         }
@@ -868,26 +935,21 @@ public final class DynamicIslandManager {
         let next = metricsReader.sample()
         latestSnapshot = next
 
-        if isFeatureEnabled(.focusTimer), focusTimer.tick() {
-            NSSound(named: "Glass")?.play()
-            showHUD(title: "专注完成", detail: "休息一下吧", symbolName: "checkmark.circle.fill", duration: 3.5)
-        }
-
         if hasSampledBaseline && state != .expanded {
             if isFeatureEnabled(.audioControl) {
                 if next.isMuted != prev.isMuted {
                     let pct = next.volumePercentInt ?? 0
                     showHUD(
-                        title: next.isMuted ? "已静音" : "取消静音",
-                        detail: next.isMuted ? "系统音频输出已静音" : "当前音量 \(pct)%",
+                        title: next.isMuted ? L10n.text("island.muted", "已静音") : L10n.text("island.unmute", "取消静音"),
+                        detail: next.isMuted ? L10n.text("island.systemAudioOutputIsMuted", "系统音频输出已静音") : L10n.text("island.currentVolume", "当前音量 {arg1}%", ["arg1": String(describing: pct)]),
                         symbolName: next.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
                         duration: 1.8
                     )
                 } else if let newVol = next.volume, let oldVol = prev.volume, abs(newVol - oldVol) >= 0.02 {
                     let pct = Int((newVol * 100).rounded())
                     showHUD(
-                        title: "系统音量 \(pct)%",
-                        detail: next.isMuted ? "已静音" : "音频输出",
+                        title: L10n.text("island.systemVolume", "系统音量 {arg1}%", ["arg1": String(describing: pct)]),
+                        detail: next.isMuted ? L10n.text("island.muted", "已静音") : L10n.text("island.audioOutput", "音频输出"),
                         symbolName: pct == 0 ? "speaker.fill" : (pct < 50 ? "speaker.wave.1.fill" : "speaker.wave.3.fill"),
                         duration: 1.8
                     )
@@ -897,15 +959,15 @@ public final class DynamicIslandManager {
             if isFeatureEnabled(.batteryAlerts), let pct = next.batteryPercent {
                 if next.isCharging != prev.isCharging {
                     showHUD(
-                        title: next.isCharging ? "开始充电" : "使用电池供电",
-                        detail: "当前电量 \(pct)%",
+                        title: next.isCharging ? L10n.text("island.chargingStarted", "开始充电") : L10n.text("island.runningOnBattery", "使用电池供电"),
+                        detail: L10n.text("island.currentBattery", "当前电量 {arg1}%", ["arg1": String(describing: pct)]),
                         symbolName: next.isCharging ? "battery.100.bolt" : "battery.75",
                         duration: 2.6
                     )
                 } else if !next.isCharging && pct <= 20 && (prev.batteryPercent ?? 100) > 20 {
                     showHUD(
-                        title: "电量不足 \(pct)%",
-                        detail: "请及时连接电源适配器",
+                        title: L10n.text("island.lowBattery", "电量不足 {arg1}%", ["arg1": String(describing: pct)]),
+                        detail: L10n.text("island.connectThePowerAdapter", "请及时连接电源适配器"),
                         symbolName: "battery.25",
                         duration: 3.2
                     )
@@ -925,7 +987,7 @@ public final class DynamicIslandManager {
                 if clipboardEntries.count > 8 { clipboardEntries.removeLast() }
                 clipboardHistoryIndex = 0
                 if state != .expanded {
-                    showHUD(title: "已复制", detail: entry.preview, symbolName: "doc.on.clipboard.fill", duration: 2.2)
+                    showHUD(title: L10n.text("island.copied", "已复制"), detail: entry.preview, symbolName: "doc.on.clipboard.fill", duration: 2.2)
                 }
             }
         }

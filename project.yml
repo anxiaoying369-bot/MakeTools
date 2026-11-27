@@ -25,6 +25,11 @@ targets:
         buildPhase: resources
       - path: Assets/MakeTools.icns
         buildPhase: resources
+      - path: Resources/Languages
+        type: folder
+        buildPhase: resources
+      - path: Resources/App
+        buildPhase: resources
     info:
       path: Sources/App/Info.plist
     entitlements:
@@ -45,11 +50,17 @@ targets:
         excludes:
           - Info.plist
           - Extension.entitlements
+      - path: Sources/Core/Localization.swift
       - path: Sources/Core/ClipboardHelper.swift
       - path: Sources/Core/ToolAppearance.swift
       - path: Sources/Tools/MarkdownPreview/ThemeCSS.swift
       - path: Sources/Tools/MarkdownPreview/MarkdownRenderer.swift
       - path: Sources/Tools/MarkdownPreview/NativeMarkdownView.swift
+      - path: Resources/Languages
+        type: folder
+        buildPhase: resources
+      - path: Resources/QuickLook
+        buildPhase: resources
     info:
       path: Sources/Extensions/MarkdownQuickLook/Info.plist
     entitlements:

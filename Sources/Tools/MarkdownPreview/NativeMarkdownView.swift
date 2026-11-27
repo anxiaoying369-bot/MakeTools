@@ -227,7 +227,7 @@ private final class CodeCopyButton: NSButton {
     init(code: String, target: AnyObject?, action: Selector?) {
         self.rawCode = code
         super.init(frame: .zero)
-        self.title = "复制"
+        self.title = L10n.text("island.copy", "复制")
         self.controlSize = .small
         ToolAppearance.configureCopy(self, symbol: "doc.on.doc")
         self.target = target
@@ -251,11 +251,7 @@ public final class NativeMarkdownView: NSView, NSUserInterfaceValidations {
 
     // MARK: - Dynamic Theme Palette
 
-    private static let cardBackground = NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(srgbRed: 0.09, green: 0.12, blue: 0.17, alpha: 1.0)
-            : NSColor(srgbRed: 0.96, green: 0.97, blue: 0.99, alpha: 1.0)
-    }
+    private static let cardBackground = ToolAppearance.canvas
 
     private static let inlineCodeBackground = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -835,7 +831,7 @@ public final class NativeMarkdownView: NSView, NSUserInterfaceValidations {
 
     @objc private func handleCopyCodeButton(_ sender: CodeCopyButton) {
         ClipboardHelper.copyText(sender.rawCode)
-        ClipboardHelper.flashButton(sender, restoreTitle: "复制")
+        ClipboardHelper.flashButton(sender, restoreTitle: L10n.text("island.copy", "复制"))
     }
 
     private func makeCalloutView(kind: CalloutKind, title: String, lines: [String]) -> NSView {
@@ -902,7 +898,7 @@ public final class NativeMarkdownView: NSView, NSUserInterfaceValidations {
         outer.spacing = 6
         outer.translatesAutoresizingMaskIntoConstraints = false
 
-        let header = NSTextField(labelWithString: "METADATA")
+        let header = NSTextField(labelWithString: L10n.text("markdown.metadata", "Metadata").uppercased(with: L10n.locale))
         header.font = .systemFont(ofSize: 11, weight: .semibold)
         header.textColor = .secondaryLabelColor
         outer.addArrangedSubview(header)

@@ -4,13 +4,76 @@ import QuartzCore
 import QuickLookThumbnailing
 
 /// Non-activating borderless floating panel used for the Dynamic Island overlay.
-private final class DynamicIslandPanel: NSPanel {
+private final class DynamicIslandPanel: NSPanel, NSDraggingDestination {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    // The window is a fallback destination even when a native control owns the hit view.
+    func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        (contentView as? DynamicIslandContentView)?.draggingEntered(sender) ?? []
+    }
+
+    func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        (contentView as? DynamicIslandContentView)?.draggingUpdated(sender) ?? []
+    }
+
+    func draggingExited(_ sender: NSDraggingInfo?) {
+        (contentView as? DynamicIslandContentView)?.draggingExited(sender)
+    }
+
+    func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        (contentView as? DynamicIslandContentView)?.performDragOperation(sender) ?? false
+    }
+}
+
+private enum IslandColors {
+    static let shell = NSColor(srgbRed: 0.037, green: 0.063, blue: 0.125, alpha: 1)
+    static let expanded = NSColor(srgbRed: 0.055, green: 0.09, blue: 0.169, alpha: 1)
+    static let card = NSColor(srgbRed: 0.087, green: 0.139, blue: 0.235, alpha: 1)
+    static let stroke = NSColor(srgbRed: 0.64, green: 0.75, blue: 1, alpha: 0.24)
+    static let accent = NSColor(srgbRed: 0.59, green: 0.73, blue: 1, alpha: 1)
+    static let text = NSColor(srgbRed: 0.85, green: 0.9, blue: 1, alpha: 1)
+    static let control = NSColor(srgbRed: 0.45, green: 0.61, blue: 1, alpha: 0.14)
+}
+
+private final class IslandGlassBackdrop: NSVisualEffectView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private struct IslandMaterialPalette {
+    let shell: NSColor
+    let expanded: NSColor
+    let card: NSColor
+    let stroke: NSColor
+
+    init(material: DynamicIslandMaterial, translucent: Bool) {
+        func color(_ hex: Int, alpha: CGFloat = 1) -> NSColor {
+            NSColor(srgbRed: CGFloat((hex >> 16) & 255) / 255,
+                    green: CGFloat((hex >> 8) & 255) / 255,
+                    blue: CGFloat(hex & 255) / 255, alpha: alpha)
+        }
+
+        switch material {
+        case .midnight:
+            (shell, expanded, card, stroke) = (IslandColors.shell, IslandColors.expanded, IslandColors.card, IslandColors.stroke)
+        case .frostedGlass:
+            (shell, expanded, card, stroke) = translucent
+                ? (color(0x15223c, alpha: 0.47), color(0x15223c, alpha: 0.52),
+                   color(0x192a47, alpha: 0.49), color(0xdbe9ff, alpha: 0.40))
+                : (color(0x1b2638), color(0x233147), color(0x2c3d57), color(0xdbe9ff, alpha: 0.32))
+        case .graphite:
+            (shell, expanded, card, stroke) = (color(0x101114), color(0x1b1d22), color(0x2b2e36), color(0xe3e6ed, alpha: 0.28))
+        case .warmAmber:
+            (shell, expanded, card, stroke) = (color(0x291a16), color(0x34231d), color(0x4c3227), color(0xffbe85, alpha: 0.36))
+        }
+    }
 }
 
 /// Dark rounded Bento tile inside the expanded Dynamic Island (direct Auto Layout, no NSBox.contentView).
 private final class IslandCardView: NSView {
+    var palette = IslandMaterialPalette(material: .midnight, translucent: false) {
+        didSet { needsDisplay = true }
+    }
     var isDropHighlighted: Bool = false {
         didSet { needsDisplay = true; layer?.setNeedsDisplay() }
     }
@@ -31,12 +94,12 @@ private final class IslandCardView: NSView {
     override func updateLayer() {
         layer?.masksToBounds = true
         layer?.cornerCurve = .continuous
-        layer?.cornerRadius = 14
+        layer?.cornerRadius = 12
         layer?.borderWidth = isDropHighlighted ? 1.4 : 0.75
-        layer?.backgroundColor = NSColor(srgbRed: 0.091, green: 0.105, blue: 0.139, alpha: 1.0).cgColor
+        layer?.backgroundColor = palette.card.cgColor
         layer?.borderColor = isDropHighlighted
-            ? NSColor.controlAccentColor.cgColor
-            : NSColor(white: 1.0, alpha: 0.10).cgColor
+            ? IslandColors.accent.cgColor
+            : palette.stroke.cgColor
     }
 }
 
@@ -44,12 +107,12 @@ private final class IslandCardView: NSView {
 private final class IslandProgressBar: NSView {
     var progress: Double = 0 {
         didSet {
-            let clamped = min(1.0, max(0.0, progress))
+            let clamped = Self.normalized(progress)
+            guard clamped != Self.normalized(oldValue) else { return }
             fillWidthConstraint?.isActive = false
-            fillWidthConstraint = fillView.widthAnchor.constraint(
-                equalTo: widthAnchor,
-                multiplier: max(0.03, clamped)
-            )
+            fillWidthConstraint = clamped == 0
+                ? fillView.widthAnchor.constraint(equalToConstant: 0)
+                : fillView.widthAnchor.constraint(equalTo: widthAnchor, multiplier: clamped)
             fillWidthConstraint?.isActive = true
             needsLayout = true
         }
@@ -64,6 +127,10 @@ private final class IslandProgressBar: NSView {
     private let fillView = NSView()
     private var fillWidthConstraint: NSLayoutConstraint?
 
+    private static func normalized(_ value: Double) -> Double {
+        value.isFinite ? min(1, max(0, value)) : 0
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -77,7 +144,7 @@ private final class IslandProgressBar: NSView {
         fillView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(fillView)
 
-        let widthC = fillView.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.03)
+        let widthC = fillView.widthAnchor.constraint(equalToConstant: 0)
         fillWidthConstraint = widthC
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 4),
@@ -96,7 +163,7 @@ private final class IslandProgressBar: NSView {
 
 /// Shared pointer and press feedback for the overlay's borderless controls.
 private class IslandButton: NSButton {
-    var normalBackground = NSColor(white: 1, alpha: 0.10) {
+    var normalBackground = IslandColors.control {
         didSet {
             if oldValue != normalBackground { updateBackground() }
         }
@@ -187,7 +254,7 @@ private final class IslandIconButton: IslandButton {
         self.setAccessibilityLabel(accessibilityLabel)
         self.contentTintColor = .white
         self.wantsLayer = true
-        self.layer?.cornerRadius = diameter / 2.0
+        self.layer?.cornerRadius = diameter * 0.34
         self.layer?.backgroundColor = normalBackground.cgColor
         self.translatesAutoresizingMaskIntoConstraints = false
         setContentHuggingPriority(.required, for: .horizontal)
@@ -245,7 +312,7 @@ private final class IslandChipButton: IslandButton {
         self.refusesFirstResponder = true
         self.font = .monospacedDigitSystemFont(ofSize: fontSize, weight: .medium)
         self.wantsLayer = true
-        self.layer?.cornerRadius = height / 2.0
+        self.layer?.cornerRadius = max(5, height * 0.36)
         self.layer?.backgroundColor = normalBackground.cgColor
         updateAttributedTitle(fontSize: fontSize)
     }
@@ -274,76 +341,6 @@ private final class IslandChipButton: IslandButton {
     override var intrinsicContentSize: NSSize {
         let base = super.intrinsicContentSize
         return NSSize(width: base.width + horizontalPadding, height: fixedHeight)
-    }
-}
-
-private final class IslandCardEditOverlay: NSView, NSDraggingSource {
-    static let dragType = NSPasteboard.PasteboardType("com.make.MakeTools.island-card")
-    let card: IslandExpandedCard
-    var onRemove: (() -> Void)?
-    var isDropTarget = false {
-        didSet {
-            layer?.borderWidth = isDropTarget ? 2 : 1
-            layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(isDropTarget ? 1 : 0.55).cgColor
-        }
-    }
-    private var dragStart: NSPoint?
-
-    init(card: IslandExpandedCard) {
-        self.card = card
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        layer?.cornerRadius = 14
-        layer?.cornerCurve = .continuous
-        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.25).cgColor
-        layer?.borderWidth = 1
-        layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.55).cgColor
-        toolTip = "拖动\(card.title)以调整位置"
-
-        let grip = ToolAppearance.icon("line.3.horizontal", size: 13, tint: .white)
-        grip.translatesAutoresizingMaskIntoConstraints = false
-        let remove = IslandIconButton(
-            symbolName: "minus", accessibilityLabel: "移除\(card.title)", diameter: 21,
-            target: self, action: #selector(removeCard)
-        )
-        remove.normalBackground = NSColor(srgbRed: 0.72, green: 0.22, blue: 0.27, alpha: 1)
-        addSubview(grip)
-        addSubview(remove)
-        NSLayoutConstraint.activate([
-            grip.centerXAnchor.constraint(equalTo: centerXAnchor),
-            grip.centerYAnchor.constraint(equalTo: centerYAnchor),
-            remove.topAnchor.constraint(equalTo: topAnchor, constant: 5),
-            remove.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5)
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    @objc private func removeCard() { onRemove?() }
-
-    override func mouseDown(with event: NSEvent) {
-        dragStart = convert(event.locationInWindow, from: nil)
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard let start = dragStart else { return }
-        let point = convert(event.locationInWindow, from: nil)
-        guard hypot(point.x - start.x, point.y - start.y) >= 4 else { return }
-        dragStart = nil
-        let item = NSPasteboardItem()
-        item.setString(card.rawValue, forType: Self.dragType)
-        let draggingItem = NSDraggingItem(pasteboardWriter: item)
-        let image = NSImage(systemSymbolName: "rectangle.on.rectangle", accessibilityDescription: card.title)
-        draggingItem.setDraggingFrame(NSRect(x: point.x - 16, y: point.y - 16, width: 32, height: 32), contents: image)
-        beginDraggingSession(with: [draggingItem], event: event, source: self)
-    }
-
-    override func mouseUp(with event: NSEvent) { dragStart = nil }
-
-    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        context == .withinApplication ? .move : []
     }
 }
 
@@ -479,24 +476,117 @@ private final class FlexiblePreviewImageView: NSImageView {
     }
 }
 
-/// Interactive single tile inside the 3x3 File Shelf grid (image thumbnail, text snippet preview, or file icon).
-private final class ShelfGridCellView: NSView, NSDraggingSource {
+/// Shared drag source for full-size shelf cells and the collapsed shelf.
+private class ShelfFileDragView: NSView, NSDraggingSource {
     var fileURL: URL?
-    var isSelectedSlot: Bool = false
-
     var onSelect: (() -> Void)?
     var onOpen: (() -> Void)?
     var onDragStarted: (() -> Void)?
     var onDragEnded: (() -> Void)?
 
+    private var mouseDownPoint: NSPoint?
+    private var didStartDrag = false
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        super.hitTest(point) == nil ? nil : self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDownPoint = convert(event.locationInWindow, from: nil)
+        didStartDrag = false
+        guard fileURL != nil else { return }
+        onSelect?()
+        if event.clickCount >= 2 {
+            onOpen?()
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let url = fileURL, !didStartDrag, let start = mouseDownPoint else {
+            return
+        }
+        let current = convert(event.locationInWindow, from: nil)
+        let dist = hypot(current.x - start.x, current.y - start.y)
+        guard dist >= 4 else { return }
+
+        didStartDrag = true
+        onDragStarted?()
+
+        let draggingItem = NSDraggingItem(pasteboardWriter: url as NSURL)
+        let previewImage = NSWorkspace.shared.icon(forFile: url.path)
+        previewImage.size = NSSize(width: 32, height: 32)
+        draggingItem.setDraggingFrame(NSRect(x: current.x - 16, y: current.y - 16, width: 32, height: 32), contents: previewImage)
+        beginDraggingSession(with: [draggingItem], event: event, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        mouseDownPoint = nil
+        didStartDrag = false
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .outsideApplication ? .copy : [.copy, .move]
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        onDragEnded?()
+    }
+}
+
+private final class CollapsedShelfTile: ShelfFileDragView {
+    private let icon = NSImageView()
+    private let title = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        icon.imageScaling = .scaleProportionallyDown
+        title.font = .systemFont(ofSize: 9, weight: .medium)
+        title.textColor = IslandColors.text
+        title.alignment = .center
+        title.lineBreakMode = .byTruncatingMiddle
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for view in [icon, title] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            icon.centerXAnchor.constraint(equalTo: centerXAnchor),
+            icon.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+            icon.widthAnchor.constraint(equalToConstant: 17),
+            icon.heightAnchor.constraint(equalToConstant: 17),
+            title.topAnchor.constraint(equalTo: icon.bottomAnchor, constant: 1),
+            title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 1),
+            title.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(_ url: URL) {
+        fileURL = url
+        let image = NSWorkspace.shared.icon(forFile: url.path)
+        image.size = NSSize(width: 17, height: 17)
+        icon.image = image
+        title.stringValue = url.lastPathComponent
+        toolTip = url.lastPathComponent
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(url.lastPathComponent)
+    }
+}
+
+/// Interactive single tile inside the 3x3 File Shelf grid.
+private final class ShelfGridCellView: ShelfFileDragView {
+    var isSelectedSlot: Bool = false
+
     private let previewContainer = NSView()
+    private let emptyIcon = ToolAppearance.icon("plus", size: 10, tint: IslandColors.text.withAlphaComponent(0.32))
     private let previewImageView = FlexiblePreviewImageView()
     private let textPreviewBox = NSView()
     private let textSnippetLabel = NSTextField(wrappingLabelWithString: "")
     private let iconView = NSImageView()
     private let nameLabel = NSTextField(labelWithString: "")
-    private var mouseDownPoint: NSPoint?
-    private var didStartDrag = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -513,14 +603,14 @@ private final class ShelfGridCellView: NSView, NSDraggingSource {
         previewImageView.wantsLayer = true
         previewImageView.layer?.cornerRadius = 5
         previewImageView.layer?.masksToBounds = true
-        previewImageView.layer?.backgroundColor = NSColor(srgbRed: 0.055, green: 0.055, blue: 0.070, alpha: 1.0).cgColor
+        previewImageView.layer?.backgroundColor = IslandColors.shell.cgColor
         previewImageView.translatesAutoresizingMaskIntoConstraints = false
 
         textPreviewBox.wantsLayer = true
         textPreviewBox.layer?.cornerRadius = 5
         textPreviewBox.layer?.masksToBounds = true
         textPreviewBox.layer?.borderWidth = 0.5
-        textPreviewBox.layer?.backgroundColor = NSColor(srgbRed: 0.063, green: 0.063, blue: 0.082, alpha: 1.0).cgColor
+        textPreviewBox.layer?.backgroundColor = IslandColors.expanded.cgColor
         textPreviewBox.layer?.borderColor = NSColor(white: 1.0, alpha: 0.10).cgColor
         textPreviewBox.translatesAutoresizingMaskIntoConstraints = false
 
@@ -551,6 +641,14 @@ private final class ShelfGridCellView: NSView, NSDraggingSource {
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(previewContainer)
+        emptyIcon.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(emptyIcon)
+        NSLayoutConstraint.activate([
+            emptyIcon.centerXAnchor.constraint(equalTo: centerXAnchor),
+            emptyIcon.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        previewContainer.isHidden = true
+        nameLabel.isHidden = true
         addSubview(nameLabel)
 
         NSLayoutConstraint.activate([
@@ -599,7 +697,7 @@ private final class ShelfGridCellView: NSView, NSDraggingSource {
         layer?.masksToBounds = true
         layer?.cornerRadius = 9
         if fileURL == nil {
-            layer?.backgroundColor = NSColor(srgbRed: 0.090, green: 0.090, blue: 0.110, alpha: 0.65).cgColor
+            layer?.backgroundColor = IslandColors.control.cgColor
             layer?.borderWidth = 0.75
             layer?.borderColor = NSColor(white: 1.0, alpha: 0.05).cgColor
         } else if isSelectedSlot {
@@ -607,7 +705,7 @@ private final class ShelfGridCellView: NSView, NSDraggingSource {
             layer?.borderWidth = 1.4
             layer?.borderColor = NSColor.controlAccentColor.cgColor
         } else {
-            layer?.backgroundColor = NSColor(srgbRed: 0.118, green: 0.118, blue: 0.145, alpha: 1.0).cgColor
+            layer?.backgroundColor = IslandColors.shell.cgColor
             layer?.borderWidth = 0.75
             layer?.borderColor = NSColor(white: 1.0, alpha: 0.10).cgColor
         }
@@ -616,7 +714,8 @@ private final class ShelfGridCellView: NSView, NSDraggingSource {
     func configure(with url: URL?, isSelected: Bool) {
         let urlChanged = (self.fileURL != url)
         self.fileURL = url
-        self.isSelectedSlot = isSelected
+        self.isSelectedSlot = url != nil && isSelected
+        emptyIcon.isHidden = url != nil
 
         if urlChanged {
             if let url {
@@ -671,50 +770,11 @@ private final class ShelfGridCellView: NSView, NSDraggingSource {
         }
     }
 
-    override func mouseDown(with event: NSEvent) {
-        mouseDownPoint = convert(event.locationInWindow, from: nil)
-        didStartDrag = false
-        guard fileURL != nil else { return }
-        onSelect?()
-        if event.clickCount >= 2 {
-            onOpen?()
-        }
-    }
 
-    override func mouseDragged(with event: NSEvent) {
-        guard let url = fileURL, !didStartDrag, let start = mouseDownPoint else {
-            return
-        }
-        let current = convert(event.locationInWindow, from: nil)
-        let dist = hypot(current.x - start.x, current.y - start.y)
-        guard dist >= 4 else { return }
-
-        didStartDrag = true
-        onDragStarted?()
-
-        let draggingItem = NSDraggingItem(pasteboardWriter: url as NSURL)
-        let previewImage = NSWorkspace.shared.icon(forFile: url.path)
-        previewImage.size = NSSize(width: 32, height: 32)
-        draggingItem.setDraggingFrame(NSRect(x: current.x - 16, y: current.y - 16, width: 32, height: 32), contents: previewImage)
-        beginDraggingSession(with: [draggingItem], event: event, source: self)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        mouseDownPoint = nil
-        didStartDrag = false
-    }
-
-    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        context == .outsideApplication ? .copy : [.copy, .move]
-    }
-
-    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        onDragEnded?()
-    }
 }
 
 /// Main visual view rendered inside `DynamicIslandPanel` with authentic Apple Notch silhouette & 3x3 File Shelf.
-public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate {
+public final class DynamicIslandContentView: NSView {
     private weak var manager: DynamicIslandManager?
 
     private var trackingArea: NSTrackingArea?
@@ -723,6 +783,13 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
     private var clipboardMenu: NSMenu?
     private lazy var passwordBook = PasswordBookWindowController()
     private var calendarCountdown: CalendarCountdownWindowController?
+    private weak var presentedPasswordBook: NSWindow?
+    private weak var presentedBookmarks: NSWindow?
+
+    var hasOpenEditor: Bool {
+        calendarCountdown?.window?.isVisible == true ||
+            presentedPasswordBook?.isVisible == true || presentedBookmarks?.isVisible == true
+    }
     private let webBookmarkStore = WebBookmarkStore()
     private var webBookmarks: [WebBookmark] = []
     private lazy var webBookmarksWindow: WebBookmarksWindowController = {
@@ -733,25 +800,25 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         }
         return controller
     }()
-    private var isEditingLayout = false
-    private var cardEditors: [IslandExpandedCard: IslandCardEditOverlay] = [:]
-    private var cardDropTarget: IslandExpandedCard? {
-        didSet {
-            guard cardDropTarget != oldValue else { return }
-            if let oldValue { cardEditors[oldValue]?.isDropTarget = false }
-            if let cardDropTarget { cardEditors[cardDropTarget]?.isDropTarget = true }
-        }
-    }
     private let editLayoutButton = IslandIconButton(
-        symbolName: "pencil", accessibilityLabel: "编辑组件", target: nil, action: nil
-    )
-    private let addCardButton = IslandIconButton(
-        symbolName: "plus", accessibilityLabel: "添加组件", target: nil, action: nil
+        symbolName: "pencil", accessibilityLabel: L10n.text("island.layout.edit", "编辑布局…"), target: nil, action: nil
     )
     private var isDragHighlighted = false
 
-    private static let outline = NSColor(white: 1, alpha: 0.16).cgColor
+    private static let outline = IslandColors.stroke.cgColor
     private let pillShapeLayer = CAShapeLayer()
+    private let glass = IslandGlassBackdrop()
+    private struct GlassShape: Equatable {
+        let size: NSSize
+        let cornerRadius: CGFloat
+        let earRadius: CGFloat
+        let isTopAttached: Bool
+    }
+
+    private var glassShape: GlassShape?
+    private var appearanceObserver: NSObjectProtocol?
+    private var usesGlass = false
+    private var palette = IslandMaterialPalette(material: .midnight, translucent: false)
     public let contentContainer = NSView()
     public private(set) var currentGeometry: IslandGeometry = IslandGeometry.compute(
         screenFrame: NSRect(x: 0, y: 0, width: 1920, height: 1080),
@@ -763,6 +830,8 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
 
     // Mutually exclusive state views (only the active one is mounted in contentContainer)
     private let collapsedBar = NSStackView()
+    private let collapsedShelf = NSStackView()
+    private var collapsedShelfFiles: [URL] = []
     private let hudContainer = NSView()
     private let hudBar = NSStackView()
     private var hudTopConstraint: NSLayoutConstraint?
@@ -795,7 +864,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
     private let expandedBatteryLabel = NSTextField(labelWithString: "")
     private let pinButton = IslandIconButton(
         symbolName: "pin",
-        accessibilityLabel: "固定灵动岛",
+        accessibilityLabel: L10n.text("island.pinDynamicIsland", "固定灵动岛"),
         target: nil,
         action: nil
     )
@@ -816,7 +885,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
     private let audioSection = NSStackView()
     private let muteButton = IslandIconButton(
         symbolName: "speaker.wave.2.fill",
-        accessibilityLabel: "静音/取消静音",
+        accessibilityLabel: L10n.text("island.muteOrUnmute", "静音/取消静音"),
         diameter: 18,
         pointSize: 9,
         target: nil,
@@ -825,7 +894,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
     private let volumeSlider = NSSlider(value: 0.5, minValue: 0.0, maxValue: 1.0, target: nil, action: nil)
     private let volumeValueLabel = NSTextField(labelWithString: "50%")
     private let keepAwakeButton = IslandChipButton(
-        title: "☕ 防休眠: 关",
+        title: L10n.text("island.keepAwakeOff.263", "☕ 防休眠: 关"),
         fontSize: 10,
         horizontalPadding: 12,
         height: 20,
@@ -838,7 +907,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
     private let timerCountdownLabel = NSTextField(labelWithString: "25:00")
     private let timerToggleButton = IslandIconButton(
         symbolName: "play.fill",
-        accessibilityLabel: "开始/暂停专注",
+        accessibilityLabel: L10n.text("island.startOrPauseFocus", "开始/暂停专注"),
         diameter: 22,
         pointSize: 9.5,
         target: nil,
@@ -846,9 +915,22 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
     )
 
     private var bookmarkCard = IslandCardView()
-    private let bookmarkEmptyLabel = NSTextField(labelWithString: "添加常用网页，点击名称即可打开")
+    private let bookmarkEmptyLabel = NSTextField(labelWithString: L10n.text("island.addWebsitesThenClickANameTo", "添加常用网页，点击名称即可打开"))
     private var bookmarkLinks: [IslandChipButton] = []
     private weak var bookmarkManageButton: IslandChipButton?
+
+    private var lanTransferCard = IslandCardView()
+    private let lanTransfer = LANTransferController.shared
+    private var lanTransferObserver: NSObjectProtocol?
+    private var lanTransferLinkWindow: LANTransferLinkWindowController?
+    private var revealLANTransferLinkWhenReady = false
+    private let lanTransferToggle = IslandChipButton(title: L10n.text("island.enable", "开启"), fontSize: 10, horizontalPadding: 9, height: 17,
+                                                    target: nil, action: nil)
+    private let lanTransferQR = IslandChipButton(title: L10n.text("island.qrCode", "二维码"), fontSize: 10, horizontalPadding: 9, height: 17,
+                                                target: nil, action: nil)
+    private let lanTransferCopy = IslandChipButton(title: L10n.text("lanTransfer.copyLink", "复制链接"), fontSize: 10, horizontalPadding: 9, height: 17,
+                                                  target: nil, action: nil)
+    private let lanTransferStatus = NSTextField(labelWithString: "")
 
     private var calendarCard = IslandCardView()
     private let calendarDateLabel = NSTextField(labelWithString: "")
@@ -860,14 +942,15 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
 
     // Bento Card D: 3x3 File Shelf (230pt height)
     private var shelfCard = IslandCardView()
-    private let shelfHeaderLabel = NSTextField(labelWithString: "暂存架 (0/9)")
+    private let shelfHeaderLabel = NSTextField(labelWithString: L10n.text("island.shelf09", "暂存架 (0/9)"))
     private let shelfActionsGroup = NSStackView()
-    private let shelfHintLabel = NSTextField(labelWithString: "拖入文件到顶部灵动岛（支持多文件九宫格）")
+    private var shelfActionButtons: [NSButton] = []
+    private let shelfHintLabel = NSTextField(labelWithString: L10n.text("island.dragUpToNineFilesToDynamic", "拖入文件到顶部灵动岛（支持多文件九宫格）"))
     private var shelfCells: [ShelfGridCellView] = []
 
     // Expanded footer: Clipboard History
     private let clipboardIndexLabel = NSTextField(labelWithString: "0/0")
-    private let clipboardLabel = NSTextField(labelWithString: "剪贴板: 暂无文本")
+    private let clipboardLabel = NSTextField(labelWithString: L10n.text("island.clipboardNoText", "剪贴板: 暂无文本"))
 
     private var lastExpandedLayout: IslandExpandedLayout?
     private var lastExpandedCards: [IslandExpandedCard] = []
@@ -881,9 +964,10 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         return fmt
     }()
 
-    private static let fullTimeFormatter: DateFormatter = {
+    private let fullTimeFormatter: DateFormatter = {
         let fmt = DateFormatter()
-        fmt.dateFormat = "M月d日 HH:mm:ss"
+        fmt.locale = L10n.locale
+        fmt.dateFormat = L10n.text("island.dateTimeFormat", "M月d日 HH:mm:ss")
         return fmt
     }()
 
@@ -891,12 +975,28 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         self.manager = manager
         super.init(frame: .zero)
         setupView()
-        registerForDraggedTypes([.fileURL, IslandCardEditOverlay.dragType])
+        lanTransferObserver = NotificationCenter.default.addObserver(
+            forName: LANTransferController.didChange, object: lanTransfer, queue: .main
+        ) { [weak self] _ in self?.refreshLANTransferCard() }
+        refreshLANTransferCard()
+        appearanceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.applyMaterial(self.manager?.material ?? .midnight)
+        }
+        registerForDraggedTypes([.fileURL])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        if let lanTransferObserver { NotificationCenter.default.removeObserver(lanTransferObserver) }
+        if let appearanceObserver { NSWorkspace.shared.notificationCenter.removeObserver(appearanceObserver) }
+        lanTransferLinkWindow?.close()
     }
 
     // MARK: - Setup
@@ -906,22 +1006,44 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         layer?.backgroundColor = NSColor.clear.cgColor
         layer?.masksToBounds = false
 
-        pillShapeLayer.fillColor = NSColor(srgbRed: 0.012, green: 0.015, blue: 0.022, alpha: 0.99).cgColor
+        pillShapeLayer.fillColor = IslandColors.shell.cgColor
         pillShapeLayer.strokeColor = Self.outline
         pillShapeLayer.lineWidth = 0.75
         pillShapeLayer.shadowColor = NSColor.black.cgColor
         pillShapeLayer.shadowOffset = CGSize(width: 0, height: -4)
         pillShapeLayer.shadowRadius = 4
         pillShapeLayer.shadowOpacity = 0.22
+        glass.material = .hudWindow
+        glass.appearance = NSAppearance(named: .darkAqua)
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.isHidden = true
+        glass.wantsLayer = true
+        addSubview(glass)
+        glass.layer?.zPosition = -1
         layer?.addSublayer(pillShapeLayer)
 
         contentContainer.wantsLayer = true
         contentContainer.layer?.backgroundColor = NSColor.clear.cgColor
         addSubview(contentContainer)
 
+        collapsedShelf.orientation = .horizontal
+        collapsedShelf.alignment = .centerY
+        collapsedShelf.distribution = .fillEqually
+        collapsedShelf.spacing = 3
+        collapsedShelf.setAccessibilityLabel(L10n.text("island.shelf", "暂存架"))
+        collapsedShelf.edgeInsets = NSEdgeInsets(top: 4, left: 6, bottom: 4, right: 6)
+        collapsedShelf.wantsLayer = true
+        collapsedShelf.layer?.cornerCurve = .continuous
+        collapsedShelf.layer?.cornerRadius = 12
+        collapsedShelf.layer?.borderWidth = 0.75
+        collapsedShelf.isHidden = true
+        addSubview(collapsedShelf)
+
         setupCollapsedBar()
         setupHUDBar()
         setupExpandedContainer()
+        applyMaterial(manager?.material ?? .midnight)
 
         applyState(.collapsed)
         applyGeometry(currentGeometry, animated: false)
@@ -1119,19 +1241,19 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
 
         let openAppBtn = IslandIconButton(
             symbolName: "slider.horizontal.3",
-            accessibilityLabel: "打开 MakeTools 主窗口",
+            accessibilityLabel: L10n.text("menu.openMaketools", "打开 MakeTools 主窗口"),
             target: self,
             action: #selector(handleOpenMainWindow(_:))
         )
         let passwordBookButton = IslandIconButton(
             symbolName: "key.fill",
-            accessibilityLabel: "密码本",
+            accessibilityLabel: L10n.text("island.passwordBook", "密码本"),
             target: self,
             action: #selector(handleOpenPasswordBook(_:))
         )
         let collapseBtn = IslandIconButton(
             symbolName: "chevron.up",
-            accessibilityLabel: "收起灵动岛",
+            accessibilityLabel: L10n.text("island.collapseDynamicIsland", "收起灵动岛"),
             target: self,
             action: #selector(handleCollapseTapped(_:))
         )
@@ -1143,12 +1265,8 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         headerRow.addArrangedSubview(pinButton)
         headerRow.addArrangedSubview(passwordBookButton)
         editLayoutButton.target = self
-        editLayoutButton.action = #selector(toggleLayoutEditing)
-        addCardButton.target = self
-        addCardButton.action = #selector(showHiddenCards(_:))
-        addCardButton.isHidden = true
+        editLayoutButton.action = #selector(openLayoutEditor(_:))
         headerRow.addArrangedSubview(editLayoutButton)
-        headerRow.addArrangedSubview(addCardButton)
         headerRow.addArrangedSubview(openAppBtn)
         headerRow.addArrangedSubview(collapseBtn)
 
@@ -1163,19 +1281,11 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         audioCard = buildAudioAndKeepAwakeCard()
         timerCard = buildTimerCard()
         calendarCard = buildCalendarCard()
+        lanTransferCard = buildLANTransferCard()
         bookmarkCard = buildBookmarkCard()
         webBookmarks = (try? webBookmarkStore.load()) ?? []
         refreshBookmarkCard()
         shelfCard = buildShelfCard()
-        for card in IslandExpandedCard.allCases {
-            let view = cardView(for: card)
-            let gesture = NSPressGestureRecognizer(target: self, action: #selector(handleLayoutPress(_:)))
-            gesture.minimumPressDuration = 0.45
-            gesture.delaysPrimaryMouseButtonEvents = false
-            gesture.delegate = self
-            view.addGestureRecognizer(gesture)
-        }
-
         // Footer row (22pt): Clipboard history
         footerRow.orientation = .horizontal
         footerRow.alignment = .centerY
@@ -1183,11 +1293,11 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         footerRow.translatesAutoresizingMaskIntoConstraints = false
 
         let historyButton = IslandChipButton(
-            title: "剪贴板 ▾", horizontalPadding: 12, height: 20,
+            title: L10n.text("island.clipboard", "剪贴板 ▾"), horizontalPadding: 12, height: 20,
             target: self, action: #selector(handleShowClipboardHistory(_:))
         )
-        historyButton.toolTip = "显示剪贴板历史"
-        historyButton.setAccessibilityLabel("显示剪贴板历史")
+        historyButton.toolTip = L10n.text("island.showClipboardHistory", "显示剪贴板历史")
+        historyButton.setAccessibilityLabel(L10n.text("island.showClipboardHistory", "显示剪贴板历史"))
         historyButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         clipboardIndexLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
@@ -1204,8 +1314,8 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
 
         let prevClipBtn = IslandChipButton(title: "‹", fontSize: 11, horizontalPadding: 8, height: 19, target: self, action: #selector(handlePrevClipboard(_:)))
         let nextClipBtn = IslandChipButton(title: "›", fontSize: 11, horizontalPadding: 8, height: 19, target: self, action: #selector(handleNextClipboard(_:)))
-        let copyClipBtn = IslandChipButton(title: "复制", fontSize: 10, horizontalPadding: 9, height: 19, target: self, action: #selector(handleCopyClipboard(_:)))
-        let demoHudBtn = IslandChipButton(title: "演示", fontSize: 10, horizontalPadding: 9, height: 19, target: self, action: #selector(handleDemoHUD(_:)))
+        let copyClipBtn = IslandChipButton(title: L10n.text("island.copy", "复制"), fontSize: 10, horizontalPadding: 9, height: 19, target: self, action: #selector(handleCopyClipboard(_:)))
+        let demoHudBtn = IslandChipButton(title: L10n.text("island.demo", "演示"), fontSize: 10, horizontalPadding: 9, height: 19, target: self, action: #selector(handleDemoHUD(_:)))
 
         footerRow.addArrangedSubview(historyButton)
         footerRow.addArrangedSubview(clipboardIndexLabel)
@@ -1235,11 +1345,14 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         let icon = NSImageView()
         icon.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
         icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 9.5, weight: .semibold)
-        icon.contentTintColor = NSColor(white: 0.60, alpha: 1.0)
+        icon.contentTintColor = IslandColors.accent
+        icon.setAccessibilityElement(false)
 
         let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: 10.5, weight: .semibold)
-        label.textColor = NSColor(white: 0.64, alpha: 1.0)
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = IslandColors.text
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let row = NSStackView(views: [icon, label])
         row.orientation = .horizontal
@@ -1256,13 +1369,13 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let headerTitle = makeCardHeader(symbolName: "cpu", title: "性能")
+        let headerTitle = makeCardHeader(symbolName: "cpu", title: L10n.text("island.performance", "性能"))
         let headerSpacer = NSView()
         headerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         for (label, color, title) in [
-            (downloadSpeedLabel, NSColor.systemTeal, "下行网速"),
-            (uploadSpeedLabel, NSColor.systemBlue, "上行网速")
+            (downloadSpeedLabel, NSColor.systemTeal, L10n.text("island.downloadSpeed", "下行网速")),
+            (uploadSpeedLabel, NSColor.systemBlue, L10n.text("island.uploadSpeed", "上行网速"))
         ] {
             label.font = .monospacedDigitSystemFont(ofSize: 9.5, weight: .medium)
             label.textColor = color
@@ -1303,7 +1416,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         let memRow = NSStackView()
         memRow.orientation = .horizontal
         memRow.alignment = .centerY
-        let memName = NSTextField(labelWithString: "内存")
+        let memName = NSTextField(labelWithString: L10n.text("island.memory", "内存"))
         memName.font = .systemFont(ofSize: 9.5)
         memName.textColor = NSColor(white: 0.78, alpha: 1.0)
         let memSpacer = NSView()
@@ -1350,7 +1463,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         stack.spacing = 5
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let header = makeCardHeader(symbolName: "speaker.wave.2", title: "音频与防休眠")
+        let header = makeCardHeader(symbolName: "speaker.wave.2", title: L10n.text("island.audioAndKeepAwake", "音频与防休眠"))
 
         muteButton.target = self
         muteButton.action = #selector(handleMuteToggle(_:))
@@ -1398,7 +1511,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let headerTitle = makeCardHeader(symbolName: "timer", title: "专注")
+        let headerTitle = makeCardHeader(symbolName: "timer", title: L10n.text("island.focus.186", "专注"))
         let headerSpacer = NSView()
         headerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
@@ -1423,7 +1536,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
 
         let resetBtn = IslandIconButton(
             symbolName: "arrow.counterclockwise",
-            accessibilityLabel: "重置计时器",
+            accessibilityLabel: L10n.text("island.resetTimer", "重置计时器"),
             diameter: 22,
             pointSize: 9.5,
             target: self,
@@ -1455,12 +1568,12 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         let spacer = NSView()
         spacer.setContentHuggingPriority(.fittingSizeCompression, for: .horizontal)
         let button = IslandChipButton(
-            title: "查看", fontSize: 10, horizontalPadding: 9, height: 16,
+            title: L10n.text("island.view", "查看"), fontSize: 10, horizontalPadding: 9, height: 16,
             target: self, action: #selector(handleOpenCalendar(_:))
         )
-        button.toolTip = "打开日历与日期倒计时"
-        button.setAccessibilityLabel("打开日历与日期倒计时")
-        let header = NSStackView(views: [makeCardHeader(symbolName: "calendar", title: "日历"), calendarDateLabel, spacer, button])
+        button.toolTip = L10n.text("island.openCalendarAndCountdowns", "打开日历与日期倒计时")
+        button.setAccessibilityLabel(L10n.text("island.openCalendarAndCountdowns", "打开日历与日期倒计时"))
+        let header = NSStackView(views: [makeCardHeader(symbolName: "calendar", title: L10n.text("calendar.calendar", "日历")), calendarDateLabel, spacer, button])
         header.spacing = 5
         header.orientation = .horizontal
         header.alignment = .centerY
@@ -1494,16 +1607,114 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         return card
     }
 
+    private func buildLANTransferCard() -> IslandCardView {
+        let card = IslandCardView()
+        lanTransferToggle.target = self
+        lanTransferToggle.action = #selector(handleToggleLANTransfer)
+        lanTransferToggle.setAccessibilityLabel(L10n.text("island.toggleLocalNetworkFileReception", "开启或关闭局域网文件接收"))
+        lanTransferQR.target = self
+        lanTransferQR.action = #selector(showLANTransferQRCode)
+        lanTransferCopy.target = self
+        lanTransferCopy.action = #selector(copyLANTransferLink)
+        for button in [lanTransferToggle, lanTransferQR, lanTransferCopy] {
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
+
+        let space = NSView()
+        space.setContentHuggingPriority(.fittingSizeCompression, for: .horizontal)
+        let header = NSStackView(views: [
+            makeCardHeader(symbolName: "wifi", title: L10n.text("lanTransfer.title", "局域网传输")), space, lanTransferToggle
+        ])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 5
+
+        lanTransferStatus.font = .systemFont(ofSize: 10.5, weight: .medium)
+        lanTransferStatus.lineBreakMode = .byTruncatingTail
+        lanTransferStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let actions = NSStackView(views: [lanTransferQR, lanTransferCopy])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 5
+
+        let stack = NSStackView(views: [header, lanTransferStatus, actions])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 7),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -10),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: card.bottomAnchor, constant: -6),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            lanTransferStatus.widthAnchor.constraint(equalTo: stack.widthAnchor)
+        ])
+        return card
+    }
+
+    private func refreshLANTransferCard() {
+        let state = lanTransfer.state
+        lanTransferToggle.normalBackground = state.isEnabled ? IslandColors.accent.withAlphaComponent(0.26) : IslandColors.control
+        lanTransferToggle.title = state.isEnabled ? L10n.text("island.off", "关闭") : L10n.text("island.enable", "开启")
+        lanTransferQR.isEnabled = state.url != nil
+        lanTransferCopy.isEnabled = state.url != nil
+        lanTransferStatus.textColor = .lightGray
+        switch state {
+        case .off:
+            lanTransferStatus.stringValue = L10n.text("island.off.296", "已关闭")
+        case .starting:
+            lanTransferStatus.stringValue = L10n.text("island.starting", "正在启动…")
+        case .listening(let url):
+            lanTransferStatus.stringValue = lanTransfer.lastReceivedName.map { L10n.text("island.received", "已收到  {arg1}", ["arg1": String(describing: $0)]) } ?? L10n.text("island.waitingForUploadsFromTheLocalNetwork", "等待同一网络中的设备上传")
+            lanTransferStatus.textColor = .systemTeal
+            if revealLANTransferLinkWhenReady {
+                revealLANTransferLinkWhenReady = false
+                showLANTransferLink(url)
+            }
+        case .failed(let message):
+            lanTransferStatus.stringValue = message
+            lanTransferStatus.textColor = .systemOrange
+        }
+        lanTransferStatus.toolTip = lanTransferStatus.stringValue
+        if !state.isEnabled {
+            revealLANTransferLinkWhenReady = false
+            if lanTransferLinkWindow?.window?.isVisible == true { lanTransferLinkWindow?.close() }
+        }
+    }
+
+    @objc private func handleToggleLANTransfer() {
+        let enabled = !lanTransfer.state.isEnabled
+        revealLANTransferLinkWhenReady = enabled
+        lanTransfer.setEnabled(enabled)
+    }
+
+    @objc private func showLANTransferQRCode() {
+        if let url = lanTransfer.state.url { showLANTransferLink(url) }
+    }
+
+    private func showLANTransferLink(_ url: URL) {
+        if lanTransferLinkWindow == nil { lanTransferLinkWindow = LANTransferLinkWindowController() }
+        lanTransferLinkWindow?.show(url: url, from: lanTransferQR)
+    }
+
+    @objc private func copyLANTransferLink() {
+        if lanTransfer.copyLink() {
+            ClipboardHelper.flashButton(lanTransferCopy, restoreTitle: L10n.text("lanTransfer.copyLink", "复制链接"))
+        }
+    }
+
     private func buildBookmarkCard() -> IslandCardView {
         let card = IslandCardView()
         let spacer = NSView()
         spacer.setContentHuggingPriority(.fittingSizeCompression, for: .horizontal)
         let manage = IslandChipButton(
-            title: "全部", fontSize: 10, horizontalPadding: 9, height: 16,
+            title: L10n.text("island.all", "全部"), fontSize: 10, horizontalPadding: 9, height: 16,
             target: self, action: #selector(handleManageBookmarks(_:))
         )
         bookmarkManageButton = manage
-        let header = NSStackView(views: [makeCardHeader(symbolName: "bookmark", title: "网络书签"), spacer, manage])
+        let header = NSStackView(views: [makeCardHeader(symbolName: "bookmark", title: L10n.text("island.webBookmarks", "网络书签")), spacer, manage])
         header.orientation = .horizontal
         header.alignment = .centerY
         header.spacing = 5
@@ -1551,11 +1762,11 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
             link.isHidden = bookmark == nil
             link.title = bookmark?.title ?? ""
             link.toolTip = bookmark?.url.absoluteString
-            link.setAccessibilityLabel(bookmark.map { "打开书签 \($0.title)" })
+            link.setAccessibilityLabel(bookmark.map { L10n.text("island.openBookmark", "打开书签 {arg1}", ["arg1": String(describing: $0.title)]) })
         }
         let manage = bookmarkManageButton
-        manage?.title = webBookmarks.isEmpty ? "添加" : "全部"
-        manage?.setAccessibilityLabel(webBookmarks.isEmpty ? "添加网络书签" : "查看全部网络书签")
+        manage?.title = webBookmarks.isEmpty ? L10n.text("island.add", "添加") : L10n.text("island.all", "全部")
+        manage?.setAccessibilityLabel(webBookmarks.isEmpty ? L10n.text("island.addWebBookmark", "添加网络书签") : L10n.text("island.showAllWebBookmarks", "查看全部网络书签"))
     }
 
     private func buildShelfCard() -> IslandCardView {
@@ -1568,7 +1779,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
 
         // Header row
         let icon = NSImageView()
-        icon.image = NSImage(systemSymbolName: "tray.and.arrow.down", accessibilityDescription: "暂存架")
+        icon.image = NSImage(systemSymbolName: "tray.and.arrow.down", accessibilityDescription: L10n.text("island.shelf", "暂存架"))
         icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 9.5, weight: .semibold)
         icon.contentTintColor = NSColor(white: 0.60, alpha: 1.0)
 
@@ -1578,10 +1789,17 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         let headerSpacer = NSView()
         headerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let openBtn = IslandChipButton(title: "打开", fontSize: 9.5, horizontalPadding: 7, height: 17, target: self, action: #selector(handleOpenShelfFile(_:)))
-        let shareBtn = IslandChipButton(title: "分享", fontSize: 9.5, horizontalPadding: 7, height: 17, target: self, action: #selector(handleShareShelfFiles(_:)))
-        let removeBtn = IslandChipButton(title: "移除", fontSize: 9.5, horizontalPadding: 7, height: 17, target: self, action: #selector(handleRemoveSelectedShelfFile(_:)))
-        let clearBtn = IslandChipButton(title: "清空", fontSize: 9.5, horizontalPadding: 7, height: 17, target: self, action: #selector(handleClearShelf(_:)))
+        let openBtn = IslandIconButton(symbolName: "arrow.up.right.square", accessibilityLabel: L10n.text("island.open", "打开"),
+                                       diameter: 18, target: self, action: #selector(handleOpenShelfFile(_:)))
+        let shareBtn = IslandIconButton(symbolName: "square.and.arrow.up", accessibilityLabel: L10n.text("island.share", "分享"),
+                                        diameter: 18, target: self, action: #selector(handleShareShelfFiles(_:)))
+        let removeBtn = IslandIconButton(symbolName: "minus", accessibilityLabel: L10n.text("island.remove.311", "移除"),
+                                         diameter: 18, target: self, action: #selector(handleRemoveSelectedShelfFile(_:)))
+        let clearBtn = IslandIconButton(symbolName: "trash", accessibilityLabel: L10n.text("island.clear", "清空"),
+                                        diameter: 18, target: self, action: #selector(handleClearShelf(_:)))
+        shelfActionButtons = [openBtn, shareBtn, removeBtn, clearBtn]
+        shelfHeaderLabel.lineBreakMode = .byTruncatingTail
+        shelfHeaderLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         shelfActionsGroup.orientation = .horizontal
         shelfActionsGroup.alignment = .centerY
@@ -1642,6 +1860,9 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         shelfHintLabel.font = .systemFont(ofSize: 10)
         shelfHintLabel.textColor = NSColor(white: 0.54, alpha: 1.0)
         shelfHintLabel.alignment = .center
+        shelfHintLabel.lineBreakMode = .byTruncatingTail
+        shelfHintLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        shelfHintLabel.heightAnchor.constraint(equalToConstant: 13).isActive = true
 
         stack.addArrangedSubview(headerRow)
         stack.addArrangedSubview(gridColumn)
@@ -1662,12 +1883,6 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
             rowStack.widthAnchor.constraint(equalTo: gridColumn.widthAnchor).isActive = true
             rowStack.heightAnchor.constraint(equalTo: rowStacks[0].heightAnchor).isActive = true
         }
-        if let firstCell = shelfCells.first {
-            for cell in shelfCells.dropFirst() {
-                cell.widthAnchor.constraint(equalTo: firstCell.widthAnchor).isActive = true
-                cell.heightAnchor.constraint(equalTo: firstCell.heightAnchor).isActive = true
-            }
-        }
         return card
     }
 
@@ -1682,7 +1897,6 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
             footerRow.isHidden = hideFooter
             if hideFooter { dismissClipboardMenu() }
         }
-        if isEditingLayout { addCardButton.isHidden = hiddenCardsToAdd().isEmpty }
         guard lastExpandedLayout != layout || lastExpandedCards != cards else { return }
         lastExpandedLayout = layout
         lastExpandedCards = cards
@@ -1698,7 +1912,6 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         bentoStacks.removeAll()
 
         bentoHost.isHidden = cards.isEmpty
-        updateLayoutEditingControls()
         guard !cards.isEmpty else { return }
 
         let hasShelf = cards.contains(.shelf)
@@ -1763,6 +1976,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         case .shelf: return shelfCard
         case .calendar: return calendarCard
         case .bookmarks: return bookmarkCard
+        case .lanTransfer: return lanTransferCard
         }
     }
 
@@ -1786,23 +2000,64 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         CATransaction.setDisableActions(true)
         let activePillRect = effectivePillRect()
         contentContainer.frame = activePillRect
+        updateShelfFrame()
+        updateTrackingAreas()
         updateShapeLayer(for: activePillRect, geometry: currentGeometry, animated: false)
         CATransaction.commit()
     }
 
-    private func effectivePillRect() -> NSRect {
-        let target = currentGeometry.pillRect
-        if bounds.width <= 1 || bounds.height <= 1 {
-            return target
+    func applyMaterial(_ value: DynamicIslandMaterial) {
+        usesGlass = value.usesBackdrop && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        palette = IslandMaterialPalette(material: value, translucent: usesGlass)
+        glass.isHidden = !usesGlass
+        for card in IslandExpandedCard.allCases { cardView(for: card).palette = palette }
+        collapsedShelf.layer?.backgroundColor = (usesGlass ? palette.expanded.blended(withFraction: 0.62, of: IslandColors.shell) ?? IslandColors.shell : palette.expanded).cgColor
+        collapsedShelf.layer?.borderColor = palette.stroke.cgColor
+        updateShapeLayer(for: effectivePillRect(), geometry: currentGeometry, animated: false)
+    }
+
+    private func effectivePillRect() -> NSRect { centeredRect(currentGeometry.pillRect) }
+
+    private func centeredRect(_ target: NSRect) -> NSRect {
+        guard bounds.width > 1, bounds.height > 1 else { return target }
+        let geometryWidth = max(currentGeometry.pillRect.width, currentGeometry.collapsedShelfRect?.width ?? 0)
+        let inset = (currentGeometry.panelFrame.width - geometryWidth) / 2
+        let width = min(target.width, max(1, bounds.width - 2 * inset))
+        let topInset = currentGeometry.panelFrame.height - target.maxY
+        let top = max(bounds.minY, bounds.maxY - topInset)
+        let height = min(target.height, top - bounds.minY)
+        return NSRect(x: bounds.midX - width / 2, y: top - height, width: width, height: height)
+    }
+
+    private func updateShelfFrame() {
+        if let rect = currentGeometry.collapsedShelfRect, !collapsedShelfFiles.isEmpty, displayedState == .collapsed {
+            let frame = centeredRect(rect)
+            collapsedShelf.frame = frame
+            collapsedShelf.isHidden = frame.height < rect.height - 1
+        } else {
+            collapsedShelf.isHidden = true
         }
-        let maxW = max(1, bounds.width - target.minX * 2)
-        let maxH = max(1, bounds.height - target.minY)
-        return NSRect(
-            x: target.minX,
-            y: target.minY,
-            width: min(target.width, maxW),
-            height: min(target.height, maxH)
-        )
+    }
+
+    private func updateCollapsedShelf(_ files: [URL]) {
+        if collapsedShelfFiles != files {
+            collapsedShelfFiles = files
+            for tile in collapsedShelf.arrangedSubviews {
+                collapsedShelf.removeArrangedSubview(tile)
+                tile.removeFromSuperview()
+            }
+            for (index, file) in files.enumerated() {
+                let tile = CollapsedShelfTile(frame: .zero)
+                tile.configure(file)
+                tile.onSelect = { [weak self] in self?.manager?.selectDroppedFile(at: index) }
+                tile.onOpen = { [weak self] in self?.manager?.openDroppedFile(at: index) }
+                tile.onDragStarted = { [weak self] in self?.manager?.isInternalDragInProgress = true }
+                tile.onDragEnded = { [weak self] in self?.manager?.isInternalDragInProgress = false }
+                collapsedShelf.addArrangedSubview(tile)
+                tile.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            }
+        }
+        updateShelfFrame()
     }
 
     public func applyGeometry(_ geometry: IslandGeometry, animated: Bool) {
@@ -1824,8 +2079,28 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             contentContainer.frame = geometry.pillRect
+            updateShelfFrame()
             updateShapeLayer(for: geometry.pillRect, geometry: geometry, animated: false)
             CATransaction.commit()
+        }
+    }
+
+    private func updateGlass(in rect: NSRect, geometry: IslandGeometry) {
+        glass.frame = rect
+        guard rect.width > 0, rect.height > 0 else { return }
+        let shape = GlassShape(size: rect.size, cornerRadius: geometry.cornerRadius,
+                               earRadius: geometry.earRadius, isTopAttached: geometry.isTopAttached)
+        guard shape != glassShape else { return }
+        glassShape = shape
+        let path = Self.makeIslandPath(pillRect: NSRect(origin: .zero, size: shape.size),
+                                       cornerRadius: shape.cornerRadius, earRadius: shape.earRadius,
+                                       isTopAttached: shape.isTopAttached)
+        glass.maskImage = NSImage(size: shape.size, flipped: false) { _ in
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            context.setFillColor(NSColor.black.cgColor)
+            context.addPath(path)
+            context.fillPath()
+            return true
         }
     }
 
@@ -1837,13 +2112,17 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
             isTopAttached: geometry.isTopAttached
         )
         let isExpanded = (manager?.state == .expanded)
-        let targetShadowRadius: CGFloat = isExpanded ? 14 : 4
-        let targetShadowOpacity: Float = isExpanded ? 0.42 : 0.20
+        let shellColor = (isExpanded ? palette.expanded : palette.shell).cgColor
+        if usesGlass { updateGlass(in: rect, geometry: geometry) }
+        if !isDragHighlighted { pillShapeLayer.strokeColor = palette.stroke.cgColor }
+        let targetShadowRadius: CGFloat = isExpanded ? 18 : 5
+        let targetShadowOpacity: Float = isExpanded ? 0.43 : 0.27
 
         if animated {
             let presentation = pillShapeLayer.presentation() ?? pillShapeLayer
             let transitions: [(String, Any?, Any)] = [
                 ("path", presentation.path, path),
+                ("fillColor", presentation.fillColor, shellColor),
                 ("shadowPath", presentation.shadowPath, path),
                 ("shadowRadius", presentation.shadowRadius, targetShadowRadius),
                 ("shadowOpacity", presentation.shadowOpacity, targetShadowOpacity)
@@ -1864,6 +2143,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         pillShapeLayer.path = path
+        pillShapeLayer.fillColor = shellColor
         pillShapeLayer.shadowPath = path
         pillShapeLayer.shadowRadius = targetShadowRadius
         pillShapeLayer.shadowOpacity = targetShadowOpacity
@@ -1907,7 +2187,6 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         rebuildExpandedLayoutIfNeeded()
         if state != .expanded {
             dismissClipboardMenu()
-            setLayoutEditing(false)
         }
 
         let activeView: NSView
@@ -1949,9 +2228,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         isDragHighlighted = active
         shelfCard.isDropHighlighted = active
         pillShapeLayer.lineWidth = active ? 1.5 : 0.75
-        pillShapeLayer.strokeColor = active
-            ? NSColor.controlAccentColor.cgColor
-            : NSColor(white: 1.0, alpha: 0.12).cgColor
+        pillShapeLayer.strokeColor = active ? IslandColors.accent.cgColor : palette.stroke.cgColor
     }
 
     private func updateCollapsedBarContent(now: Date = Date()) {
@@ -2016,15 +2293,15 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         updateCalendarCard(events: manager.calendarEvents, now: now)
 
         // Expanded header
-        expandedClockLabel.stringValue = manager.expandedNotice?.title ?? Self.fullTimeFormatter.string(from: now)
+        expandedClockLabel.stringValue = manager.expandedNotice?.title ?? fullTimeFormatter.string(from: now)
         expandedClockLabel.toolTip = manager.expandedNotice?.detail
         if let battery = snap.batteryPercent {
             let symbol = snap.isCharging ? "battery.100.bolt" : (battery > 60 ? "battery.75" : (battery > 25 ? "battery.50" : "battery.25"))
-            expandedBatteryIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "电量")
+            expandedBatteryIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: L10n.text("island.battery", "电量"))
             expandedBatteryIcon.contentTintColor = snap.isCharging ? .systemGreen : NSColor(white: 0.70, alpha: 1.0)
             expandedBatteryLabel.stringValue = "\(battery)%"
         } else {
-            expandedBatteryIcon.image = NSImage(systemSymbolName: "powerplug.fill", accessibilityDescription: "外接电源")
+            expandedBatteryIcon.image = NSImage(systemSymbolName: "powerplug.fill", accessibilityDescription: L10n.text("island.externalPower", "外接电源"))
             expandedBatteryIcon.contentTintColor = NSColor(white: 0.70, alpha: 1.0)
             expandedBatteryLabel.stringValue = "AC"
         }
@@ -2066,7 +2343,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
             volumeSlider.isEnabled = true
             volumeSlider.doubleValue = Double(vol)
             let pct = Int((vol * 100).rounded())
-            volumeValueLabel.stringValue = snap.isMuted ? "静音" : "\(pct)%"
+            volumeValueLabel.stringValue = snap.isMuted ? L10n.text("island.muted.198", "静音") : "\(pct)%"
             muteButton.setSymbol(snap.isMuted ? "speaker.slash.fill" : (pct < 50 ? "speaker.wave.1.fill" : "speaker.wave.2.fill"), pointSize: 9)
         } else {
             volumeSlider.isEnabled = false
@@ -2075,7 +2352,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
             muteButton.setSymbol("speaker.slash", pointSize: 9)
         }
 
-        keepAwakeButton.title = manager.isKeepAwakeActive ? "☕ 防休眠: 开" : "☕ 防休眠: 关"
+        keepAwakeButton.title = manager.isKeepAwakeActive ? L10n.text("island.keepAwakeOn.316", "☕ 防休眠: 开") : L10n.text("island.keepAwakeOff.263", "☕ 防休眠: 关")
         keepAwakeButton.normalBackground = manager.isKeepAwakeActive
             ? NSColor.systemOrange.withAlphaComponent(0.85)
             : NSColor(white: 1.0, alpha: 0.10)
@@ -2086,9 +2363,9 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
 
         // 3x3 File shelf
         let files = manager.droppedFiles
-        shelfHeaderLabel.stringValue = "暂存架 (\(files.count)/\(DynamicIslandManager.maxShelfFiles))"
-        shelfActionsGroup.isHidden = files.isEmpty
-        shelfHintLabel.isHidden = !files.isEmpty
+        updateCollapsedShelf(manager.isFeatureEnabled(.fileShelf) ? files : [])
+        shelfHeaderLabel.stringValue = L10n.text("island.shelf.318", "暂存架 ({arg1}/{arg2})", ["arg1": String(describing: files.count), "arg2": String(describing: DynamicIslandManager.maxShelfFiles)])
+        for button in shelfActionButtons { button.isEnabled = !files.isEmpty }
         shelfCard.isDropHighlighted = isDragHighlighted || manager.isExternalFileDragActive
 
         for idx in 0..<shelfCells.count {
@@ -2100,7 +2377,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         // Clipboard history footer
         if manager.clipboardEntries.isEmpty {
             clipboardIndexLabel.stringValue = "0/0"
-            clipboardLabel.stringValue = "暂无历史"
+            clipboardLabel.stringValue = L10n.text("island.noHistory", "暂无历史")
         } else {
             clipboardIndexLabel.stringValue = "\(manager.clipboardHistoryIndex + 1)/\(manager.clipboardEntries.count)"
             clipboardLabel.stringValue = manager.currentClipboardItem
@@ -2118,7 +2395,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         }
         let area = NSTrackingArea(
             rect: rect,
-            options: [.mouseEnteredAndExited, .activeAlways],
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways],
             owner: self,
             userInfo: nil
         )
@@ -2127,22 +2404,33 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
     }
 
     fileprivate var blocksAutomaticCollapse: Bool {
-        isEditingLayout || clipboardMenu != nil || containsPointer
+        clipboardMenu != nil || containsPointer
     }
 
-    private var containsPointer: Bool {
+    fileprivate var containsPointer: Bool {
         guard let window, window.isVisible else { return false }
         let mouseInWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
-        return currentGeometry.interactionRect(for: effectivePillRect()).contains(convert(mouseInWindow, from: nil))
+        let point = convert(mouseInWindow, from: nil)
+        let pill = effectivePillRect()
+        if displayedState == .collapsed, !currentGeometry.isTopAttached {
+            return makeCapsule(in: pill).contains(point)
+        }
+        return currentGeometry.interactionRect(for: pill).contains(point)
     }
 
-    public override func mouseEntered(with event: NSEvent) {
-        guard containsPointer else { return }
+    private func makeCapsule(in rect: NSRect) -> CGPath {
+        let radius = min(rect.width, rect.height) / 2
+        return CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    }
+
+    public override func mouseEntered(with event: NSEvent) { updateHoverExpansion() }
+    public override func mouseMoved(with event: NSEvent) { updateHoverExpansion() }
+
+    private func updateHoverExpansion() {
+        guard containsPointer else { cancelPendingHoverExpansion(); return }
         hoverOutWorkItem?.cancel()
         hoverOutWorkItem = nil
-
-        cancelPendingHoverExpansion()
-        guard let manager, manager.isEnabled, manager.hoverToExpand,
+        guard hoverInWorkItem == nil, let manager, manager.isEnabled, manager.hoverToExpand,
               manager.state != .expanded, NSEvent.pressedMouseButtons == 0 else { return }
 
         let item = DispatchWorkItem { [weak self] in
@@ -2195,131 +2483,44 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         super.mouseDown(with: event)
     }
 
-    // MARK: - Panel Layout Editing
-
-    public func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldAttemptToRecognizeWith event: NSEvent) -> Bool {
-        guard !isEditingLayout, manager?.state == .expanded, let view = gestureRecognizer.view else { return false }
-        let point = view.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow
-        var hit = view.hitTest(point)
-        while let current = hit, current !== view {
-            if current is NSControl || current is ShelfGridCellView { return false }
-            hit = current.superview
-        }
-        return true
-    }
-
-    @objc private func handleLayoutPress(_ sender: NSPressGestureRecognizer) {
-        if sender.state == .began { setLayoutEditing(true) }
-    }
-
-    @objc private func toggleLayoutEditing() { setLayoutEditing(!isEditingLayout) }
-
-    private func setLayoutEditing(_ enabled: Bool) {
-        guard enabled != isEditingLayout else { return }
-        isEditingLayout = enabled
-        cardDropTarget = nil
-        updateLayoutEditingControls()
-        if !enabled && !containsPointer { scheduleHoverCollapse() }
-    }
-
-    private func updateLayoutEditingControls() {
-        let title = isEditingLayout ? "完成编辑" : "编辑组件"
-        editLayoutButton.setAccessibilityLabel(title)
-        editLayoutButton.toolTip = title
-        editLayoutButton.setSymbol(isEditingLayout ? "checkmark" : "pencil")
-        let available = hiddenCardsToAdd()
-        addCardButton.isHidden = !isEditingLayout || available.isEmpty
-        guard isEditingLayout else {
-            for editor in cardEditors.values { editor.removeFromSuperview() }
-            cardEditors.removeAll()
-            return
-        }
-        for card in IslandExpandedCard.allCases where cardEditors[card] == nil {
-            let view = cardView(for: card)
-            let editor = IslandCardEditOverlay(card: card)
-            editor.onRemove = { [weak self] in self?.manager?.setExpandedCardHidden(card, hidden: true) }
-            view.addSubview(editor)
-            NSLayoutConstraint.activate([
-                editor.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                editor.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                editor.topAnchor.constraint(equalTo: view.topAnchor),
-                editor.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-            ])
-            cardEditors[card] = editor
-        }
-    }
-
-    private func hiddenCardsToAdd() -> [IslandExpandedCard] {
-        guard let manager else { return [] }
-        return IslandExpandedCard.allCases.filter { manager.hiddenExpandedCards.contains($0) && manager.isExpandedCardEnabled($0) }
-    }
-
-    @objc private func showHiddenCards(_ sender: NSButton) {
-        let menu = NSMenu(title: "添加组件")
-        for card in hiddenCardsToAdd() {
-            let item = NSMenuItem(title: card.title, action: #selector(restoreCard(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = card.rawValue
-            menu.addItem(item)
-        }
-        let bottom = sender.isFlipped ? sender.bounds.maxY : sender.bounds.minY
-        menu.popUp(positioning: nil, at: NSPoint(x: sender.bounds.minX, y: bottom), in: sender)
-    }
-
-    @objc private func restoreCard(_ sender: NSMenuItem) {
-        guard let name = sender.representedObject as? String, let card = IslandExpandedCard(rawValue: name) else { return }
-        manager?.setExpandedCardHidden(card, hidden: false)
-    }
-
-    private func layoutDropTarget(for sender: NSDraggingInfo) -> IslandExpandedCard? {
-        guard isEditingLayout, let source = sender.draggingSource as? IslandCardEditOverlay,
-              cardEditors[source.card] === source else { return nil }
-        let point = convert(sender.draggingLocation, from: nil)
-        return manager?.activeExpandedCards.first { card in
-            let view = cardView(for: card)
-            return card != source.card && view.convert(view.bounds, to: self).insetBy(dx: -3, dy: -3).contains(point)
-        }
+    @objc private func openLayoutEditor(_ sender: NSButton) {
+        manager?.openLayoutEditor(from: sender)
     }
 
     // MARK: - Drag & Drop
 
+    private func canReceiveFiles(from sender: NSDraggingInfo) -> Bool {
+        guard manager?.isFeatureEnabled(.fileShelf) == true,
+              !(sender.draggingSource is ShelfFileDragView),
+              sender.draggingSourceOperationMask.contains(.copy) else { return false }
+        let point = convert(sender.draggingLocation, from: nil)
+        return currentGeometry.interactionRect(for: effectivePillRect()).contains(point)
+            || (!collapsedShelf.isHidden && collapsedShelf.frame.contains(point))
+    }
+
     public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if sender.draggingSource is IslandCardEditOverlay { return draggingUpdated(sender) }
-        guard !isEditingLayout, manager?.isFileShelfVisible == true,
-              sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else {
-            return []
-        }
-        setExternalDropHighlight(true)
-        if manager?.state != .expanded { manager?.expand() }
-        return .copy
+        draggingUpdated(sender)
     }
 
     public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if sender.draggingSource is IslandCardEditOverlay {
-            cardDropTarget = layoutDropTarget(for: sender)
-            return cardDropTarget == nil ? [] : .move
-        }
-        return isDragHighlighted && !isEditingLayout ? .copy : []
+        let accepted = canReceiveFiles(from: sender) && sender.draggingPasteboard.canReadObject(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+        )
+        if isDragHighlighted != accepted { setExternalDropHighlight(accepted) }
+        return accepted ? .copy : []
     }
 
     public override func draggingExited(_ sender: NSDraggingInfo?) {
-        cardDropTarget = nil
-        setExternalDropHighlight(manager?.isExternalFileDragActive == true)
+        setExternalDropHighlight(false)
     }
 
     public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        if let source = sender.draggingSource as? IslandCardEditOverlay {
-            defer { cardDropTarget = nil }
-            guard let target = layoutDropTarget(for: sender) else { return false }
-            manager?.moveExpandedCard(source.card, onto: target)
-            return true
-        }
-        setExternalDropHighlight(false)
-        guard !isEditingLayout, manager?.isFileShelfVisible == true else { return false }
+        defer { setExternalDropHighlight(false) }
+        guard canReceiveFiles(from: sender), let manager else { return false }
         let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
         guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL],
               !urls.isEmpty else { return false }
-        manager?.addDroppedFiles(urls)
+        manager.addDroppedFiles(urls)
         return true
     }
 
@@ -2328,7 +2529,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         calendarCountdown?.refresh(now: now, calendar: calendar)
         guard manager?.activeExpandedCards.contains(.calendar) == true else { return }
         let today = CountdownDay(date: now, calendar: calendar)
-        let holidays = ChinaHolidayCalendar.shared
+        let holidays = HolidayCalendar.shared
         holidays.refresh(around: today.year, now: now)
         let revision = holidays.revision
         guard calendarDisplayDay != today || displayedCalendarEvents != events || calendarHolidayRevision != revision else { return }
@@ -2337,13 +2538,13 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         calendarHolidayRevision = revision
         calendarDateLabel.stringValue = now.formatted(
             Date.FormatStyle(date: .omitted, time: .omitted, calendar: calendar, timeZone: calendar.timeZone)
-                .month().day().weekday(.abbreviated)
+                .month().day().weekday(.abbreviated).locale(L10n.locale)
         )
         if let nextHoliday = HolidayCountdown.upcoming(in: Array(holidays.daysByDate.values), now: now, calendar: calendar).first {
             calendarHolidayLabel.stringValue = "\(nextHoliday.holiday.name) · \(CalendarCountdown.status(for: nextHoliday.days))"
             calendarHolidayLabel.toolTip = calendarHolidayLabel.stringValue
         } else {
-            calendarHolidayLabel.stringValue = "暂无已同步的近期节假日"
+            calendarHolidayLabel.stringValue = L10n.text("calendar.noUpcomingHolidaysSynced", "暂无已同步的近期节假日")
             calendarHolidayLabel.toolTip = nil
         }
 
@@ -2351,7 +2552,7 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
             calendarEventLabel.stringValue = "\(next.event.title) · \(CalendarCountdown.status(for: next.days))"
             calendarEventLabel.toolTip = calendarEventLabel.stringValue
         } else {
-            calendarEventLabel.stringValue = "选择日期或添加事件"
+            calendarEventLabel.stringValue = L10n.text("island.selectADateOrAddAnEvent", "选择日期或添加事件")
             calendarEventLabel.toolTip = nil
         }
     }
@@ -2360,12 +2561,13 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
 
     @objc private func handleManageBookmarks(_ sender: NSButton) {
         webBookmarksWindow.show(from: sender)
+        presentedBookmarks = webBookmarksWindow.window
     }
 
     @objc private func handleOpenBookmark(_ sender: NSButton) {
         guard webBookmarks.indices.contains(sender.tag) else { return }
         if !webBookmarksWindow.openBookmark(webBookmarks[sender.tag]) {
-            manager?.showHUD(title: "无法打开书签", detail: webBookmarks[sender.tag].title, symbolName: "bookmark")
+            manager?.showHUD(title: L10n.text("island.cannotOpenBookmark", "无法打开书签"), detail: webBookmarks[sender.tag].title, symbolName: "bookmark")
         }
     }
 
@@ -2377,7 +2579,10 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         calendarCountdown?.show(from: sender)
     }
 
-    @objc private func handleOpenPasswordBook(_ sender: NSButton) { passwordBook.show(from: sender) }
+    @objc private func handleOpenPasswordBook(_ sender: NSButton) {
+        passwordBook.show(from: sender)
+        presentedPasswordBook = passwordBook.window
+    }
     @objc private func handlePinTapped(_ sender: Any?) { manager?.togglePin() }
     @objc private func handleOpenMainWindow(_ sender: Any?) { manager?.openMainWindow() }
     @objc private func handleCollapseTapped(_ sender: Any?) { manager?.collapse(force: true) }
@@ -2401,12 +2606,12 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
         guard let manager, sender.window != nil,
               manager.isFeatureEnabled(.clipboardHistory), clipboardMenu == nil else { return }
 
-        let menu = NSMenu(title: "剪贴板历史")
+        let menu = NSMenu(title: L10n.text("island.clipboardHistory", "剪贴板历史"))
         menu.autoenablesItems = false
         menu.minimumWidth = 220
 
         if manager.clipboardEntries.isEmpty {
-            let item = NSMenuItem(title: "暂无剪贴板历史", action: nil, keyEquivalent: "")
+            let item = NSMenuItem(title: L10n.text("island.noClipboardHistory", "暂无剪贴板历史"), action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
         } else {
@@ -2443,10 +2648,10 @@ public final class DynamicIslandContentView: NSView, NSGestureRecognizerDelegate
     @objc private func handleCopyClipboard(_ sender: Any?) {
         guard let manager, !manager.clipboardEntries.isEmpty else { return }
         manager.copyCurrentClipboardItem()
-        manager.showHUD(title: "已复制历史记录", detail: manager.currentClipboardItem, symbolName: "doc.on.clipboard.fill", duration: 1.8)
+        manager.showHUD(title: L10n.text("island.copiedFromHistory", "已复制历史记录"), detail: manager.currentClipboardItem, symbolName: "doc.on.clipboard.fill", duration: 1.8)
     }
     @objc private func handleDemoHUD(_ sender: Any?) {
-        manager?.showHUD(title: "灵动提示", detail: "MakeTools 实时状态已就绪", symbolName: "sparkles", duration: 2.2)
+        manager?.showHUD(title: L10n.text("island.islandAlert", "灵动提示"), detail: L10n.text("island.maketoolsLiveStatusIsReady", "MakeTools 实时状态已就绪"), symbolName: "sparkles", duration: 2.2)
     }
 }
 
@@ -2458,7 +2663,10 @@ public final class DynamicIslandWindowController {
 
     public var currentPanelFrame: NSRect { panel.frame }
 
+    var hasOpenEditor: Bool { contentView.hasOpenEditor }
+
     var blocksAutomaticCollapse: Bool { contentView.blocksAutomaticCollapse }
+    var isPointerOverPill: Bool { contentView.containsPointer }
 
     public var currentCollapsedPillWidth: CGFloat {
         contentView.currentGeometry.pillSize.width
@@ -2485,8 +2693,10 @@ public final class DynamicIslandWindowController {
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.isMovable = false
+        panel.acceptsMouseMovedEvents = true
         panel.hidesOnDeactivate = false
         panel.contentView = contentView
+        panel.registerForDraggedTypes([.fileURL])
         self.panel = panel
     }
 
@@ -2512,15 +2722,19 @@ public final class DynamicIslandWindowController {
     public func refreshContents() {
         contentView.refreshTelemetry()
         if let manager, manager.state == .collapsed,
-           manager.collapsedCustomWidth <= 0,
            let newGeom = Self.computeCurrentGeometry(for: manager, contentView: contentView),
-           abs(contentView.currentGeometry.pillSize.width - newGeom.pillSize.width) >= 6 {
+           (abs(contentView.currentGeometry.pillSize.width - newGeom.pillSize.width) >= 6
+            || contentView.currentGeometry.collapsedShelfRect?.size != newGeom.collapsedShelfRect?.size) {
             syncState(animated: true)
         }
     }
 
     public func setExternalDropHighlight(_ active: Bool) {
         contentView.setExternalDropHighlight(active)
+    }
+
+    func applyMaterial(_ material: DynamicIslandMaterial) {
+        contentView.applyMaterial(material)
     }
 
     public func syncState(animated: Bool) {
@@ -2572,7 +2786,9 @@ public final class DynamicIslandWindowController {
             hasFileShelf: manager.isFileShelfVisible,
             showFooter: manager.isFeatureEnabled(.clipboardHistory),
             collapsedDesiredWidth: desiredCollapsedWidth,
-            expandedLayout: manager.expandedLayout
+            expandedLayout: manager.expandedLayout,
+            floatingTopInset: screen.frame.maxY - screen.visibleFrame.maxY,
+            collapsedFileCount: manager.isFeatureEnabled(.fileShelf) ? manager.droppedFiles.count : 0
         )
     }
 }

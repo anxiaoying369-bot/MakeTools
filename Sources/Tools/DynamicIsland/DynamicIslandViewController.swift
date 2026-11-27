@@ -2,8 +2,8 @@ import AppKit
 
 public final class DynamicIslandTool: ToolModule {
     public let id = "dynamic-island"
-    public let title = "系统灵动岛"
-    public let subtitle = "顶部悬浮中控与实时状态"
+    public let title = L10n.text("island.dynamicIsland", "系统灵动岛")
+    public let subtitle = L10n.text("island.floatingControlsAndLiveSystemStatus", "顶部悬浮中控与实时状态")
     public let symbolName = "rectangle.topthird.inset.filled"
 
     public init() {}
@@ -17,7 +17,14 @@ private final class FlippedIslandSettingsContainer: NSView {
     override var isFlipped: Bool { true }
 }
 
-public final class DynamicIslandViewController: NSViewController, NSTextFieldDelegate {
+public final class DynamicIslandViewController: NSViewController, NSTextFieldDelegate, NSMenuDelegate {
+    private let pages = NSSegmentedControl(
+        labels: [L10n.text("island.shortcuts", "快捷操作"),
+                 L10n.text("island.appearanceAndInteraction", "外观与交互"),
+                 L10n.text("island.features", "功能模块")],
+        trackingMode: .selectOne, target: nil, action: nil
+    )
+    private var pageSections: [[NSView]] = []
     private var updateObserver: NSObjectProtocol?
 
     private let enabledSwitch = NSSwitch()
@@ -26,11 +33,13 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
     private let customTitleSwitch = NSSwitch()
     private let customTitleField = NSTextField(string: "")
     private let collapsedWidthSlider = NSSlider(value: 340, minValue: 160, maxValue: 680, target: nil, action: nil)
-    private let collapsedWidthValueLabel = NSTextField(labelWithString: "自动")
-    private let collapsedWidthAutoButton = NSButton(title: "自动适配", target: nil, action: nil)
+    private let collapsedWidthValueLabel = NSTextField(labelWithString: L10n.text("island.automatic.203", "自动"))
+    private let collapsedWidthAutoButton = NSButton(title: L10n.text("island.automatic", "自动适配"), target: nil, action: nil)
     private let collapsedPreviewLabel = NSTextField(wrappingLabelWithString: "")
     private var collapsedMetricCheckboxes: [CollapsedMetricItem: NSButton] = [:]
     private var featureSwitches: [DynamicIslandFeature: NSSwitch] = [:]
+    private let materialPicker = NSPopUpButton()
+    private var materialMenuTracking = false
     private let styleSegmented = NSSegmentedControl(
         labels: DynamicIslandStyle.allCases.map(\.displayTitle),
         trackingMode: .selectOne,
@@ -38,16 +47,13 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
         action: nil
     )
 
-    private let expandedLayoutPicker = NSPopUpButton()
-    private let expandedCardPicker = NSPopUpButton()
-    private let moveCardUp = NSButton(title: "前移", target: nil, action: nil)
-    private let moveCardDown = NSButton(title: "后移", target: nil, action: nil)
     private let expandedOrderLabel = NSTextField(wrappingLabelWithString: "")
 
     private let telemetryLabel = NSTextField(wrappingLabelWithString: "")
+    private var focusControls: [NSButton] = []
     private let timerDisplayLabel = NSTextField(labelWithString: "25:00")
-    private let timerToggleButton = NSButton(title: "开始专注", target: nil, action: nil)
-    private let keepAwakeQuickButton = NSButton(title: "开启防休眠", target: nil, action: nil)
+    private let timerToggleButton = NSButton(title: L10n.text("island.startFocus", "开始专注"), target: nil, action: nil)
+    private let keepAwakeQuickButton = NSButton(title: L10n.text("island.keepAwake.208", "开启防休眠"), target: nil, action: nil)
 
     public override var nibName: NSNib.Name? { nil }
 
@@ -74,8 +80,8 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         let header = ToolAppearance.header(
-            title: "系统灵动岛",
-            subtitle: "自定义屏幕顶部的悬浮控制中心，管理实时指标、快捷操作和功能模块。",
+            title: L10n.text("island.dynamicIsland", "系统灵动岛"),
+            subtitle: L10n.text("island.customizeTheFloatingPanelAtTheTop", "自定义屏幕顶部的悬浮控制中心，管理实时指标、快捷操作和功能模块。"),
             symbol: "rectangle.topthird.inset.filled"
         )
 
@@ -86,22 +92,19 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
         let appearanceCard = buildAppearanceCard()
         let timerCard = buildTimerAndGuideCard()
 
-        stack.addArrangedSubview(header)
-        stack.setCustomSpacing(24, after: header)
-        stack.addArrangedSubview(controlCard)
-        stack.addArrangedSubview(expandedLayoutCard)
-        stack.addArrangedSubview(collapsedDisplayCard)
-        stack.addArrangedSubview(featuresCard)
-        stack.addArrangedSubview(appearanceCard)
-        stack.addArrangedSubview(timerCard)
+        pageSections = [[controlCard, timerCard], [appearanceCard, expandedLayoutCard, collapsedDisplayCard], [featuresCard]]
+        pages.target = self
+        pages.action = #selector(showSelectedPage)
+        pages.selectedSegment = 0
+        pages.segmentDistribution = .fillEqually
 
-        header.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -64).isActive = true
-        controlCard.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -64).isActive = true
-        expandedLayoutCard.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -64).isActive = true
-        collapsedDisplayCard.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -64).isActive = true
-        featuresCard.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -64).isActive = true
-        appearanceCard.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -64).isActive = true
-        timerCard.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -64).isActive = true
+        for item in [header, pages] + pageSections.flatMap({ $0 }) {
+            stack.addArrangedSubview(item)
+            item.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -64).isActive = true
+        }
+        stack.setCustomSpacing(16, after: header)
+        stack.setCustomSpacing(18, after: pages)
+        showSelectedPage()
 
         container.addSubview(stack)
         scrollView.documentView = container
@@ -129,6 +132,12 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
             queue: .main
         ) { [weak self] _ in
             self?.syncFromManager()
+        }
+    }
+
+    @objc private func showSelectedPage() {
+        for (index, sections) in pageSections.enumerated() {
+            for section in sections { section.isHidden = index != pages.selectedSegment }
         }
     }
 
@@ -184,12 +193,12 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
     }
 
     private func buildControlCard() -> NSView {
-        let enableRow = makeSwitchRow(title: "启用系统灵动岛", toggle: enabledSwitch, action: #selector(handleEnabledChanged(_:)))
+        let enableRow = makeSwitchRow(title: L10n.text("island.enableDynamicIsland", "启用系统灵动岛"), toggle: enabledSwitch, action: #selector(handleEnabledChanged(_:)))
 
-        let toggleExpandBtn = NSButton(title: "展开 / 收起灵动岛", target: self, action: #selector(handleToggleExpand(_:)))
+        let toggleExpandBtn = NSButton(title: L10n.text("menu.expandOrCollapseDynamicIsland", "展开 / 收起灵动岛"), target: self, action: #selector(handleToggleExpand(_:)))
         ToolAppearance.configure(toggleExpandBtn, symbol: "arrow.up.and.down")
 
-        let hudDemoBtn = NSButton(title: "发送灵动提示演示", target: self, action: #selector(handleDemoHUD(_:)))
+        let hudDemoBtn = NSButton(title: L10n.text("island.showDemoAlert", "发送灵动提示演示"), target: self, action: #selector(handleDemoHUD(_:)))
         ToolAppearance.configure(hudDemoBtn, symbol: "bell")
 
         let btnRow = NSStackView(views: [toggleExpandBtn, hudDemoBtn])
@@ -202,87 +211,33 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
         telemetryLabel.isSelectable = true
         telemetryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        return makeSettingsCard(title: "快捷操作", symbol: "power", views: [enableRow, btnRow, telemetryLabel])
+        return makeSettingsCard(title: L10n.text("island.shortcuts", "快捷操作"), symbol: "power", views: [enableRow, btnRow, telemetryLabel])
     }
 
     private func buildExpandedLayoutCard() -> NSView {
-        expandedLayoutPicker.addItems(withTitles: IslandExpandedLayout.allCases.map(\.title))
-        expandedLayoutPicker.setAccessibilityLabel("展开面板的布局")
-        expandedLayoutPicker.target = self
-        expandedLayoutPicker.action = #selector(handleExpandedLayoutChanged(_:))
-
-        let reset = NSButton(title: "恢复默认", target: self, action: #selector(handleExpandedLayoutReset))
-        ToolAppearance.configure(reset, symbol: "arrow.counterclockwise")
-        let layoutRow = NSStackView(views: [expandedLayoutPicker, reset])
-        layoutRow.orientation = .horizontal
-        layoutRow.alignment = .centerY
-        layoutRow.spacing = 8
-
-        expandedCardPicker.addItems(withTitles: IslandExpandedCard.allCases.map(\.title))
-        expandedCardPicker.menu?.autoenablesItems = false
-        expandedCardPicker.setAccessibilityLabel("要移动的卡片")
-        expandedCardPicker.target = self
-        expandedCardPicker.action = #selector(handleExpandedCardSelection)
-
-        ToolAppearance.configure(moveCardUp, symbol: "arrow.up")
-        moveCardUp.target = self
-        moveCardUp.action = #selector(handleMoveExpandedCard(_:))
-        moveCardUp.tag = -1
-
-        ToolAppearance.configure(moveCardDown, symbol: "arrow.down")
-        moveCardDown.target = self
-        moveCardDown.action = #selector(handleMoveExpandedCard(_:))
-        moveCardDown.tag = 1
-
-        let orderRow = NSStackView(views: [
-            NSTextField(labelWithString: "卡片顺序"), expandedCardPicker, moveCardUp, moveCardDown
-        ])
-        orderRow.orientation = .horizontal
-        orderRow.alignment = .centerY
-        orderRow.spacing = 8
-
         expandedOrderLabel.font = .systemFont(ofSize: 12)
         expandedOrderLabel.textColor = .secondaryLabelColor
-        expandedOrderLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let hint = NSTextField(wrappingLabelWithString: "展开后长按卡片空白处，或点击面板顶部的铅笔图标，即可拖动、移除或添加卡片。")
-        hint.font = .systemFont(ofSize: 12)
-        hint.textColor = .secondaryLabelColor
-        hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return makeSettingsCard(
-            title: "展开面板布局", symbol: "rectangle.split.2x2", views: [layoutRow, orderRow, expandedOrderLabel, hint]
-        )
-    }
-
-    private func syncExpandedLayoutControls(_ manager: DynamicIslandManager) {
-        let index = IslandExpandedLayout.allCases.firstIndex(of: manager.expandedLayout) ?? 0
-        if expandedLayoutPicker.indexOfSelectedItem != index { expandedLayoutPicker.selectItem(at: index) }
-        let isGrid = manager.expandedLayout == .grid
-        let shelfIndex = IslandExpandedCard.allCases.firstIndex(of: .shelf) ?? 0
-        expandedCardPicker.item(at: shelfIndex)?.isEnabled = isGrid
-        if !isGrid && expandedCardPicker.indexOfSelectedItem == shelfIndex {
-            expandedCardPicker.selectItem(at: 0)
-        }
-
-        let order = manager.expandedCardOrder.filter { isGrid || $0 != .shelf }
-        expandedOrderLabel.stringValue = order.map(\.title).joined(separator: " → ")
-        let selection = expandedCardPicker.indexOfSelectedItem
-        let selected = IslandExpandedCard.allCases.indices.contains(selection) ? IslandExpandedCard.allCases[selection] : nil
-        let selectedIndex = selected.flatMap(order.firstIndex(of:))
-        moveCardUp.isEnabled = selectedIndex.map { $0 > 0 } ?? false
-        moveCardDown.isEnabled = selectedIndex.map { $0 + 1 < order.count } ?? false
+        let edit = NSButton(title: L10n.text("island.layout.edit", "编辑布局…"), target: self, action: #selector(openLayoutEditor(_:)))
+        ToolAppearance.configure(edit, symbol: "square.grid.2x2")
+        let row = NSStackView(views: [edit, expandedOrderLabel])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
+        return makeSettingsCard(title: L10n.text("island.expandedPanelLayout.220", "展开面板布局"),
+                                symbol: "rectangle.split.2x2", views: [row])
     }
 
     private func buildCollapsedDisplayCard() -> NSView {
         customTitleSwitch.target = self
         customTitleSwitch.action = #selector(handleCustomTitleSwitchChanged(_:))
         customTitleSwitch.controlSize = .small
-        customTitleSwitch.setAccessibilityLabel("显示左侧自定义文字")
+        customTitleSwitch.setAccessibilityLabel(L10n.text("island.showCustomTextOnTheLeft", "显示左侧自定义文字"))
 
-        let customLabel = NSTextField(labelWithString: "显示左侧自定义文字")
+        let customLabel = NSTextField(labelWithString: L10n.text("island.showCustomTextOnTheLeft", "显示左侧自定义文字"))
         customLabel.font = .systemFont(ofSize: 13)
         customLabel.isSelectable = true
 
-        customTitleField.placeholderString = "输入自定义文案，如 MakeTools / 工作模式"
+        customTitleField.placeholderString = L10n.text("island.enterCustomTextSuchAsMaketoolsOr", "输入自定义文案，如 MakeTools / 工作模式")
         customTitleField.font = .systemFont(ofSize: 12.5)
         customTitleField.delegate = self
         customTitleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -297,7 +252,7 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
         customRow.translatesAutoresizingMaskIntoConstraints = false
         customTitleField.widthAnchor.constraint(greaterThanOrEqualToConstant: 144).isActive = true
 
-        let metricsCaption = NSTextField(wrappingLabelWithString: "选择要显示的实时指标。勾选多项时，每 3 秒轮播一项。")
+        let metricsCaption = NSTextField(wrappingLabelWithString: L10n.text("island.chooseWhichLiveMetricsToShowMultiple", "选择要显示的实时指标。勾选多项时，每 3 秒轮播一项。"))
         metricsCaption.font = .systemFont(ofSize: 12)
         metricsCaption.textColor = .secondaryLabelColor
         metricsCaption.isSelectable = true
@@ -348,10 +303,10 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
         collapsedWidthSlider.target = self
         collapsedWidthSlider.action = #selector(handleCollapsedWidthSliderChanged(_:))
         collapsedWidthSlider.controlSize = .small
-        collapsedWidthSlider.setAccessibilityLabel("灵动岛收起长度")
+        collapsedWidthSlider.setAccessibilityLabel(L10n.text("island.collapsedIslandWidth", "灵动岛收起长度"))
         collapsedWidthSlider.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let widthTitleLabel = NSTextField(labelWithString: "灵动岛收起长度")
+        let widthTitleLabel = NSTextField(labelWithString: L10n.text("island.collapsedIslandWidth", "灵动岛收起长度"))
         widthTitleLabel.font = .systemFont(ofSize: 13)
         widthTitleLabel.isSelectable = true
 
@@ -379,7 +334,7 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
         collapsedPreviewLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         return makeSettingsCard(
-            title: "收起时显示",
+            title: L10n.text("island.collapsedDisplay", "收起时显示"),
             symbol: "rectangle.compress.vertical",
             views: [customRow, metricsCaption, metricsRow, widthRow, collapsedPreviewLabel]
         )
@@ -443,11 +398,11 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
             }
         }
 
-        return makeSettingsCard(title: "功能模块", symbol: "square.grid.2x2", views: rows)
+        return makeSettingsCard(title: L10n.text("island.features", "功能模块"), symbol: "square.grid.2x2", views: rows)
     }
 
     private func buildAppearanceCard() -> NSView {
-        let styleLabel = NSTextField(labelWithString: "显示样式")
+        let styleLabel = NSTextField(labelWithString: L10n.text("island.displayStyle", "显示样式"))
         styleLabel.font = .systemFont(ofSize: 13)
         styleLabel.isSelectable = true
 
@@ -462,10 +417,25 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
         styleRow.alignment = .centerY
         styleRow.translatesAutoresizingMaskIntoConstraints = false
 
-        let hoverRow = makeSwitchRow(title: "指针悬停时展开，移出时收起", toggle: hoverSwitch, action: #selector(handleHoverChanged(_:)))
-        let dragRow = makeSwitchRow(title: "拖动文件时展开灵动岛", toggle: dragExpandSwitch, action: #selector(handleDragExpandChanged(_:)))
+        let materialTitle = L10n.text("island.material.title", "外观材质")
+        let materialLabel = NSTextField(labelWithString: materialTitle)
+        materialLabel.font = .systemFont(ofSize: 13)
+        materialPicker.addItems(withTitles: DynamicIslandMaterial.allCases.map(\.title))
+        (materialPicker.cell as? NSPopUpButtonCell)?.altersStateOfSelectedItem = false
+        materialPicker.menu?.delegate = self
+        materialPicker.setAccessibilityLabel(materialTitle)
+        materialPicker.target = self
+        materialPicker.action = #selector(handleMaterialChanged(_:))
+        let materialSpacer = NSView()
+        materialSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let materialRow = NSStackView(views: [materialLabel, materialSpacer, materialPicker])
+        materialRow.orientation = .horizontal
+        materialRow.alignment = .centerY
 
-        return makeSettingsCard(title: "外观与交互", symbol: "slider.horizontal.3", views: [styleRow, hoverRow, dragRow])
+        let hoverRow = makeSwitchRow(title: L10n.text("island.expandOnHoverAndCollapseWhenThe", "指针悬停时展开，移出时收起"), toggle: hoverSwitch, action: #selector(handleHoverChanged(_:)))
+        let dragRow = makeSwitchRow(title: L10n.text("island.expandDynamicIslandWhenDraggingFiles", "拖动文件时展开灵动岛"), toggle: dragExpandSwitch, action: #selector(handleDragExpandChanged(_:)))
+
+        return makeSettingsCard(title: L10n.text("island.appearanceAndInteraction", "外观与交互"), symbol: "slider.horizontal.3", views: [styleRow, materialRow, hoverRow, dragRow])
     }
 
     private func buildTimerAndGuideCard() -> NSView {
@@ -476,37 +446,39 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
         timerToggleButton.target = self
         timerToggleButton.action = #selector(handleTimerToggle(_:))
 
-        let resetBtn = NSButton(title: "重置", target: self, action: #selector(handleTimerReset(_:)))
+        let resetBtn = NSButton(title: L10n.text("island.reset", "重置"), target: self, action: #selector(handleTimerReset(_:)))
         resetBtn.bezelStyle = .rounded
 
-        let p5 = NSButton(title: "5 分钟", target: self, action: #selector(handlePreset5(_:)))
+        let p5 = NSButton(title: L10n.text("island.5Min", "5 分钟"), target: self, action: #selector(handlePreset5(_:)))
         p5.bezelStyle = .rounded
-        let p15 = NSButton(title: "15 分钟", target: self, action: #selector(handlePreset15(_:)))
+        let p15 = NSButton(title: L10n.text("island.15Min", "15 分钟"), target: self, action: #selector(handlePreset15(_:)))
         p15.bezelStyle = .rounded
-        let p25 = NSButton(title: "25 分钟", target: self, action: #selector(handlePreset25(_:)))
+        let p25 = NSButton(title: L10n.text("island.25Min", "25 分钟"), target: self, action: #selector(handlePreset25(_:)))
         p25.bezelStyle = .rounded
 
         ToolAppearance.configure(keepAwakeQuickButton, symbol: "cup.and.saucer")
         keepAwakeQuickButton.target = self
         keepAwakeQuickButton.action = #selector(handleKeepAwakeQuick(_:))
 
-        let timerRow = NSStackView(views: [timerDisplayLabel, timerToggleButton, resetBtn, p5, p15, p25, keepAwakeQuickButton])
+        focusControls = [timerToggleButton, resetBtn, p5, p15, p25]
+        timerDisplayLabel.textColor = ToolAppearance.accent
+        let timerRow = NSStackView(views: [timerDisplayLabel, timerToggleButton, resetBtn])
         timerRow.orientation = .horizontal
         timerRow.alignment = .centerY
-        timerRow.spacing = 8
-        timerRow.translatesAutoresizingMaskIntoConstraints = false
+        timerRow.spacing = 9
 
-        let guideLabel = NSTextField(wrappingLabelWithString: """
-        • 快捷键：按下 Cmd + Shift + D 可随时展开或收起灵动岛
-        • 后台常驻：点击主窗口左上角红色关闭按钮后，应用会从程序坞（Dock）隐藏并保持灵动岛运行，可在灵动岛或顶部菜单栏图标重新打开主窗口
-        • 拖放与预览：拖动文件时灵动岛会自动弹出，九宫格支持图片缩略图、文本内容预览、点选切换、拖出及系统分享 / 隔空投送
-        """)
+        let presets = NSStackView(views: [p5, p15, p25, keepAwakeQuickButton])
+        presets.orientation = .horizontal
+        presets.alignment = .centerY
+        presets.spacing = 7
+
+        let guideLabel = NSTextField(wrappingLabelWithString: L10n.text("island.shortcutPressCmdShiftDToExpand", "• 快捷键：按下 Cmd + Shift + D 可随时展开或收起灵动岛\n• 后台常驻：点击主窗口左上角红色关闭按钮后，应用会从程序坞（Dock）隐藏并保持灵动岛运行，可在灵动岛或顶部菜单栏图标重新打开主窗口\n• 拖放与预览：拖动文件时灵动岛会自动弹出，九宫格支持图片缩略图、文本内容预览、点选切换、拖出及系统分享 / 隔空投送"))
         guideLabel.font = .systemFont(ofSize: 12.5)
         guideLabel.textColor = .secondaryLabelColor
         guideLabel.isSelectable = true
         guideLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        return makeSettingsCard(title: "专注与防休眠", symbol: "timer", views: [timerRow, guideLabel])
+        return makeSettingsCard(title: L10n.text("island.focusAndKeepAwake", "专注与防休眠"), symbol: "timer", views: [timerRow, presets, guideLabel])
     }
 
     // MARK: - Sync & Actions
@@ -521,8 +493,11 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
             customTitleField.stringValue = manager.collapsedCustomTitle
         }
         customTitleField.isEnabled = manager.showCollapsedCustomTitle
-        styleSegmented.selectedSegment = manager.style.rawValue
-        syncExpandedLayoutControls(manager)
+        if styleSegmented.selectedSegment != manager.style.rawValue {
+            styleSegmented.selectedSegment = manager.style.rawValue
+        }
+        syncMaterialSelection()
+        expandedOrderLabel.stringValue = manager.expandedLayout.title
 
         for (item, checkbox) in collapsedMetricCheckboxes {
             checkbox.state = manager.isCollapsedMetricEnabled(item) ? .on : .off
@@ -535,15 +510,15 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
         } else {
             let actualWidth = manager.currentCollapsedPillWidth
             collapsedWidthSlider.doubleValue = Double(min(680, max(160, actualWidth)))
-            collapsedWidthValueLabel.stringValue = "自动 (\(Int(actualWidth.rounded())) pt)"
+            collapsedWidthValueLabel.stringValue = L10n.text("island.automaticPt", "自动 ({arg1} pt)", ["arg1": String(describing: Int(actualWidth.rounded()))])
             collapsedWidthAutoButton.isEnabled = false
         }
 
         let (previewLeft, previewRight) = manager.collapsedDisplayContent()
         let previewParts = [previewLeft, previewRight].compactMap { $0 }
         collapsedPreviewLabel.stringValue = previewParts.isEmpty
-            ? "当前顶部预览：●（仅状态指示点）"
-            : "当前顶部预览：● " + previewParts.joined(separator: "   ")
+            ? L10n.text("island.topBarPreviewStatusDotOnly", "当前顶部预览：●（仅状态指示点）")
+            : L10n.text("island.topBarPreview", "当前顶部预览：● ") + previewParts.joined(separator: "   ")
 
         for (feature, toggle) in featureSwitches {
             toggle.state = manager.isFeatureEnabled(feature) ? .on : .off
@@ -552,24 +527,25 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
         let snap = manager.latestSnapshot
         let batteryText: String
         if let battery = snap.batteryPercent {
-            batteryText = snap.isCharging ? "电量 \(battery)%（充电中）" : "电量 \(battery)%"
+            batteryText = snap.isCharging ? L10n.text("island.batteryCharging", "电量 {arg1}%（充电中）", ["arg1": String(describing: battery)]) : L10n.text("island.battery.243", "电量 {arg1}%", ["arg1": String(describing: battery)])
         } else {
-            batteryText = "外接电源"
+            batteryText = L10n.text("island.externalPower", "外接电源")
         }
         let volText: String
         if let pct = snap.volumePercentInt {
-            volText = snap.isMuted ? "静音" : "音量 \(pct)%"
+            volText = snap.isMuted ? L10n.text("island.muted.198", "静音") : L10n.text("island.volume.199", "音量 {arg1}%", ["arg1": String(describing: pct)])
         } else {
-            volText = "音量 N/A"
+            volText = L10n.text("island.volumeNA", "音量 N/A")
         }
-        let awakeText = manager.isKeepAwakeActive ? "防休眠开启" : "防休眠关闭"
+        let awakeText = manager.isKeepAwakeActive ? L10n.text("island.keepAwakeOn.248", "防休眠开启") : L10n.text("island.keepAwakeOff.249", "防休眠关闭")
         let down = SystemSnapshot.formatSpeed(snap.downloadBytesPerSec)
         let up = SystemSnapshot.formatSpeed(snap.uploadBytesPerSec)
-        telemetryLabel.stringValue = "实时状态：CPU \(snap.cpuPercentInt)% · 内存 \(snap.formattedMemory) · 下行 \(down) · 上行 \(up) · \(volText) · \(batteryText) · \(awakeText)"
+        telemetryLabel.stringValue = L10n.text("island.liveStatusCpuMemoryDownUp", "实时状态：CPU {arg1}% · 内存 {arg2} · 下行 {arg3} · 上行 {arg4} · {arg5} · {arg6} · {arg7}", ["arg1": String(describing: snap.cpuPercentInt), "arg2": String(describing: snap.formattedMemory), "arg3": String(describing: down), "arg4": String(describing: up), "arg5": String(describing: volText), "arg6": String(describing: batteryText), "arg7": String(describing: awakeText)])
 
+        for button in focusControls { button.isEnabled = manager.isFeatureEnabled(.focusTimer) }
         timerDisplayLabel.stringValue = manager.focusTimer.formattedRemaining
-        timerToggleButton.title = manager.focusTimer.isRunning ? "暂停专注" : "开始专注"
-        keepAwakeQuickButton.title = manager.isKeepAwakeActive ? "关闭防休眠" : "开启防休眠"
+        timerToggleButton.title = manager.focusTimer.isRunning ? L10n.text("island.pauseFocus", "暂停专注") : L10n.text("island.startFocus", "开始专注")
+        keepAwakeQuickButton.title = manager.isKeepAwakeActive ? L10n.text("island.allowSleep", "关闭防休眠") : L10n.text("island.keepAwake.208", "开启防休眠")
         keepAwakeQuickButton.isEnabled = manager.isFeatureEnabled(.keepAwake)
     }
 
@@ -614,32 +590,43 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
         DynamicIslandManager.shared.setFeature(features[sender.tag], enabled: sender.state == .on)
     }
 
+    private func syncMaterialSelection() {
+        guard !materialMenuTracking else { return }
+        let index = DynamicIslandMaterial.allCases.firstIndex(of: DynamicIslandManager.shared.material) ?? 0
+        if materialPicker.indexOfSelectedItem != index { materialPicker.selectItem(at: index) }
+        for (itemIndex, item) in materialPicker.itemArray.enumerated() {
+            let state: NSControl.StateValue = index == itemIndex ? .on : .off
+            if item.state != state { item.state = state }
+        }
+    }
+
+    public func menuWillOpen(_ menu: NSMenu) {
+        guard menu === materialPicker.menu else { return }
+        syncMaterialSelection()
+        materialMenuTracking = true
+    }
+
+    public func menuDidClose(_ menu: NSMenu) {
+        guard menu === materialPicker.menu else { return }
+        materialMenuTracking = false
+        DispatchQueue.main.async { [weak self] in self?.syncMaterialSelection() }
+    }
+
+    @objc private func handleMaterialChanged(_ sender: NSPopUpButton) {
+        let choices = DynamicIslandMaterial.allCases
+        guard choices.indices.contains(sender.indexOfSelectedItem) else { return }
+        DynamicIslandManager.shared.material = choices[sender.indexOfSelectedItem]
+        syncMaterialSelection()
+    }
+
     @objc private func handleStyleChanged(_ sender: NSSegmentedControl) {
         if let style = DynamicIslandStyle(rawValue: sender.selectedSegment) {
             DynamicIslandManager.shared.style = style
         }
     }
 
-    @objc private func handleExpandedLayoutChanged(_ sender: NSPopUpButton) {
-        let layouts = IslandExpandedLayout.allCases
-        let index = sender.indexOfSelectedItem
-        guard layouts.indices.contains(index) else { return }
-        DynamicIslandManager.shared.setExpandedLayout(layouts[index])
-    }
-
-    @objc private func handleExpandedLayoutReset() {
-        DynamicIslandManager.shared.resetExpandedLayout()
-    }
-
-    @objc private func handleExpandedCardSelection() {
-        syncExpandedLayoutControls(DynamicIslandManager.shared)
-    }
-
-    @objc private func handleMoveExpandedCard(_ sender: NSButton) {
-        let cards = IslandExpandedCard.allCases
-        let index = expandedCardPicker.indexOfSelectedItem
-        guard cards.indices.contains(index) else { return }
-        DynamicIslandManager.shared.moveExpandedCard(cards[index], by: sender.tag)
+    @objc private func openLayoutEditor(_ sender: NSButton) {
+        DynamicIslandManager.shared.openLayoutEditor(from: sender)
     }
 
     @objc private func handleToggleExpand(_ sender: Any?) {
@@ -648,8 +635,8 @@ public final class DynamicIslandViewController: NSViewController, NSTextFieldDel
 
     @objc private func handleDemoHUD(_ sender: Any?) {
         DynamicIslandManager.shared.showHUD(
-            title: "MakeTools 灵动岛",
-            detail: "功能模块已就绪，支持独立开关",
+            title: L10n.text("island.maketoolsDynamicIsland", "MakeTools 灵动岛"),
+            detail: L10n.text("island.featuresAreReadyAndCanBeToggled", "功能模块已就绪，支持独立开关"),
             symbolName: "sparkles",
             duration: 2.6
         )

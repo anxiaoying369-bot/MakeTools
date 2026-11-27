@@ -20,36 +20,39 @@ public enum DynamicIslandFeature: String, CaseIterable {
     case batteryAlerts
     case calendarCountdown
     case webBookmarks
+    case lanTransfer
 
     public var title: String {
         switch self {
-        case .systemMonitor: return "性能监控（CPU / 内存）"
-        case .downloadSpeed: return "下行网速"
-        case .uploadSpeed: return "上行网速"
-        case .audioControl: return "音量控制与 HUD 提醒"
-        case .focusTimer: return "专注倒计时"
-        case .fileShelf: return "文件暂存架与隔空投送"
-        case .keepAwake: return "屏幕防休眠（咖啡因）"
-        case .clipboardHistory: return "剪贴板历史与复制提示"
-        case .batteryAlerts: return "电池充放电与低电量提醒"
-        case .calendarCountdown: return "日历与日期倒计时"
-        case .webBookmarks: return "网络书签"
+        case .systemMonitor: return L10n.text("island.performanceMonitorCpuMemory", "性能监控（CPU / 内存）")
+        case .downloadSpeed: return L10n.text("island.downloadSpeed", "下行网速")
+        case .uploadSpeed: return L10n.text("island.uploadSpeed", "上行网速")
+        case .audioControl: return L10n.text("island.volumeControlAndAlerts", "音量控制与 HUD 提醒")
+        case .focusTimer: return L10n.text("island.focusTimer", "专注倒计时")
+        case .fileShelf: return L10n.text("island.fileShelfAndAirdrop", "文件暂存架与隔空投送")
+        case .keepAwake: return L10n.text("island.keepAwake", "屏幕防休眠（咖啡因）")
+        case .clipboardHistory: return L10n.text("island.clipboardHistoryAndCopyFeedback", "剪贴板历史与复制提示")
+        case .batteryAlerts: return L10n.text("island.batteryAndPowerAlerts", "电池充放电与低电量提醒")
+        case .calendarCountdown: return L10n.text("calendar.calendarAndCountdowns", "日历与日期倒计时")
+        case .webBookmarks: return L10n.text("island.webBookmarks", "网络书签")
+        case .lanTransfer: return L10n.text("island.localNetworkTransferCard", "局域网传输卡片")
         }
     }
 
     public var subtitle: String {
         switch self {
-        case .systemMonitor: return "实时显示 CPU 负载、内存占用及进度条"
-        case .downloadSpeed: return "在展开面板显示实时下载速度"
-        case .uploadSpeed: return "在展开面板显示实时上传速度"
-        case .audioControl: return "支持音量调节、一键静音及音量变动灵动提示"
-        case .focusTimer: return "内置番茄钟倒计时，收起后仍在顶部持续显示"
-        case .fileShelf: return "九宫格多文件暂存，拖动文件自动弹出，支持点选/拖出/隔空投送"
-        case .keepAwake: return "一键阻止 Mac 自动息屏与休眠，适合演示或长时间下载"
-        case .clipboardHistory: return "记录最近 8 条复制内容并支持历史切换与一键恢复"
-        case .batteryAlerts: return "接入/断开电源或电量低于 20% 时在灵动岛弹出提示"
-        case .calendarCountdown: return "浏览月历，查看事件还剩几天或已过去几天"
-        case .webBookmarks: return "保存常用网页并用默认浏览器打开"
+        case .systemMonitor: return L10n.text("island.showCpuUsageMemoryUsageAndProgress", "实时显示 CPU 负载、内存占用及进度条")
+        case .downloadSpeed: return L10n.text("island.showLiveDownloadSpeedInTheExpanded", "在展开面板显示实时下载速度")
+        case .uploadSpeed: return L10n.text("island.showLiveUploadSpeedInTheExpanded", "在展开面板显示实时上传速度")
+        case .audioControl: return L10n.text("island.adjustVolumeMuteAudioAndShowVolume", "支持音量调节、一键静音及音量变动灵动提示")
+        case .focusTimer: return L10n.text("island.useTheFocusTimerAndSeeIt", "内置番茄钟倒计时，收起后仍在顶部持续显示")
+        case .fileShelf: return L10n.text("island.stageFilesInAGridOpenThe", "九宫格多文件暂存，拖动文件自动弹出，支持点选/拖出/隔空投送")
+        case .keepAwake: return L10n.text("island.preventAutomaticSleepDuringPresentationsOrLong", "一键阻止 Mac 自动息屏与休眠，适合演示或长时间下载")
+        case .clipboardHistory: return L10n.text("island.keepTheLastEightTextEntriesAnd", "记录最近 8 条复制内容并支持历史切换与一键恢复")
+        case .batteryAlerts: return L10n.text("island.showANotificationWhenPowerChangesOr", "接入/断开电源或电量低于 20% 时在灵动岛弹出提示")
+        case .calendarCountdown: return L10n.text("island.browseTheCalendarAndSeeDaysRemaining", "浏览月历，查看事件还剩几天或已过去几天")
+        case .webBookmarks: return L10n.text("island.saveFrequentlyUsedWebsitesAndOpenThem", "保存常用网页并用默认浏览器打开")
+        case .lanTransfer: return L10n.text("island.startReceivingFilesShowAQrCode", "在展开面板开启接收、查看二维码或复制上传链接")
         }
     }
 
@@ -66,6 +69,7 @@ public enum DynamicIslandFeature: String, CaseIterable {
         case .batteryAlerts: return "battery.100.bolt"
         case .calendarCountdown: return "calendar"
         case .webBookmarks: return "bookmark"
+        case .lanTransfer: return "wifi"
         }
     }
 
@@ -90,10 +94,32 @@ public enum DynamicIslandStyle: Int, CaseIterable {
 
     public var displayTitle: String {
         switch self {
-        case .auto: return "自动适配"
-        case .notch: return "贴顶刘海"
-        case .floatingPill: return "悬浮胶囊"
+        case .auto: return L10n.text("island.automatic", "自动适配")
+        case .notch: return L10n.text("island.notchAligned", "贴顶刘海")
+        case .floatingPill: return L10n.text("island.floatingPill", "悬浮胶囊")
         }
+    }
+}
+
+enum DynamicIslandMaterial: String, CaseIterable {
+    case midnight
+    case frostedGlass
+    case graphite
+    case warmAmber
+
+    var title: String {
+        switch self {
+        case .midnight: return L10n.text("island.material.midnight", "午夜蓝")
+        case .frostedGlass: return L10n.text("island.material.frostedGlass", "磨砂玻璃")
+        case .graphite: return L10n.text("island.material.graphite", "石墨灰")
+        case .warmAmber: return L10n.text("island.material.warmAmber", "暖琥珀")
+        }
+    }
+
+    var usesBackdrop: Bool { self == .frostedGlass }
+
+    static func restored(_ stored: String?) -> Self {
+        stored.flatMap(Self.init(rawValue:)) ?? .midnight
     }
 }
 
@@ -104,9 +130,9 @@ public enum IslandExpandedLayout: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .shelfRight: return "暂存架靠右"
-        case .shelfLeft: return "暂存架靠左"
-        case .grid: return "双列网格"
+        case .shelfRight: return L10n.text("island.shelfOnRight", "暂存架靠右")
+        case .shelfLeft: return L10n.text("island.shelfOnLeft", "暂存架靠左")
+        case .grid: return L10n.text("island.twoColumnGrid", "双列网格")
         }
     }
 
@@ -134,7 +160,7 @@ public enum IslandExpandedLayout: String, CaseIterable {
     }
 
     func usesGrid(cardCount: Int, hasShelf: Bool) -> Bool {
-        self == .grid || (!hasShelf && cardCount > 3)
+        self == .grid || (!hasShelf && cardCount > 2)
     }
 
     func gridRows(for cards: [IslandExpandedCard]) -> [[IslandExpandedCard]] {
@@ -151,15 +177,17 @@ enum IslandExpandedCard: String, CaseIterable {
     case shelf
     case calendar
     case bookmarks
+    case lanTransfer
 
     var title: String {
         switch self {
-        case .performance: return "性能与网速"
-        case .audio: return "音频与防休眠"
-        case .focus: return "专注"
-        case .shelf: return "暂存架"
-        case .calendar: return "日历"
-        case .bookmarks: return "网络书签"
+        case .performance: return L10n.text("island.performanceAndNetwork", "性能与网速")
+        case .audio: return L10n.text("island.audioAndKeepAwake", "音频与防休眠")
+        case .focus: return L10n.text("island.focus.186", "专注")
+        case .shelf: return L10n.text("island.shelf", "暂存架")
+        case .calendar: return L10n.text("calendar.calendar", "日历")
+        case .bookmarks: return L10n.text("island.webBookmarks", "网络书签")
+        case .lanTransfer: return L10n.text("lanTransfer.title", "局域网传输")
         }
     }
 
@@ -179,6 +207,36 @@ enum IslandExpandedCard: String, CaseIterable {
     }
 }
 
+struct IslandLayoutDraft: Equatable {
+    var layout: IslandExpandedLayout
+    var order: [IslandExpandedCard]
+    var hidden: Set<IslandExpandedCard>
+
+    static let defaults = IslandLayoutDraft(layout: .shelfRight, order: IslandExpandedCard.allCases, hidden: [])
+
+    func visible(in enabled: Set<IslandExpandedCard>) -> [IslandExpandedCard] {
+        order.filter { enabled.contains($0) && !hidden.contains($0) }
+    }
+
+    func movable(in enabled: Set<IslandExpandedCard>) -> [IslandExpandedCard] {
+        visible(in: enabled).filter { layout == .grid || $0 != .shelf }
+    }
+
+    mutating func place(_ card: IslandExpandedCard, nextTo target: IslandExpandedCard? = nil, after: Bool = false) {
+        hidden.remove(card)
+        guard card != target else { return }
+        order.removeAll { $0 == card }
+        let index = target.flatMap { order.firstIndex(of: $0) }.map { $0 + (after ? 1 : 0) } ?? order.endIndex
+        order.insert(card, at: index)
+    }
+
+    mutating func move(_ card: IslandExpandedCard, by offset: Int, enabled: Set<IslandExpandedCard>) {
+        let movable = movable(in: enabled)
+        guard let source = movable.firstIndex(of: card), movable.indices.contains(source + offset) else { return }
+        place(card, nextTo: movable[source + offset], after: offset > 0)
+    }
+}
+
 /// Metrics that can be independently toggled for display on the collapsed Dynamic Island bar.
 public enum CollapsedMetricItem: String, CaseIterable {
     case cpu
@@ -192,12 +250,12 @@ public enum CollapsedMetricItem: String, CaseIterable {
     public var displayTitle: String {
         switch self {
         case .cpu: return "CPU"
-        case .memory: return "内存"
-        case .downloadSpeed: return "下行网速"
-        case .uploadSpeed: return "上行网速"
-        case .battery: return "电量"
-        case .volume: return "音量"
-        case .clock: return "时间"
+        case .memory: return L10n.text("island.memory", "内存")
+        case .downloadSpeed: return L10n.text("island.downloadSpeed", "下行网速")
+        case .uploadSpeed: return L10n.text("island.uploadSpeed", "上行网速")
+        case .battery: return L10n.text("island.battery", "电量")
+        case .volume: return L10n.text("island.volume", "音量")
+        case .clock: return L10n.text("island.time", "时间")
         }
     }
 
@@ -435,7 +493,7 @@ public struct SystemSnapshot: Equatable {
         case .cpu:
             return "CPU \(cpuPercentInt)%"
         case .memory:
-            return "内存 \(memoryPercentInt)%"
+            return L10n.text("island.memory.197", "内存 {arg1}%", ["arg1": String(describing: memoryPercentInt)])
         case .downloadSpeed:
             return "↓\(Self.formatCompactSpeed(downloadBytesPerSec))"
         case .uploadSpeed:
@@ -446,9 +504,9 @@ public struct SystemSnapshot: Equatable {
             }
             return "AC"
         case .volume:
-            if isMuted { return "静音" }
-            if let pct = volumePercentInt { return "音量 \(pct)%" }
-            return "音量 --"
+            if isMuted { return L10n.text("island.muted.198", "静音") }
+            if let pct = volumePercentInt { return L10n.text("island.volume.199", "音量 {arg1}%", ["arg1": String(describing: pct)]) }
+            return L10n.text("island.volume.200", "音量 --")
         case .clock:
             return Self.compactClockFormatter.string(from: now)
         }
@@ -470,6 +528,7 @@ public struct IslandGeometry: Equatable {
 
     public let panelFrame: NSRect
     public let pillRect: NSRect
+    let collapsedShelfRect: NSRect?
     public let pillSize: NSSize
     public let cornerRadius: CGFloat
     public let earRadius: CGFloat
@@ -496,13 +555,17 @@ public struct IslandGeometry: Equatable {
         hasFileShelf: Bool = true,
         showFooter: Bool = true,
         collapsedDesiredWidth: CGFloat? = nil,
-        expandedLayout: IslandExpandedLayout = .shelfRight
+        expandedLayout: IslandExpandedLayout = .shelfRight,
+        floatingTopInset: CGFloat = 0,
+        collapsedFileCount: Int = 0
     ) -> IslandGeometry {
         let attached = (style != .floatingPill)
         let earRadius: CGFloat = attached ? 10 : 0
         let padX: CGFloat = 16 + earRadius
         let padBottom: CGFloat = (state == .expanded) ? 22 : 8
-        var padTop: CGFloat = attached ? 0 : 4
+        let safeTop = ceil(max(0, safeAreaTop))
+        let padTop: CGFloat = attached ? 0 : 4
+        let panelTop = screenFrame.maxY - (attached ? 0 : max(safeTop, floatingTopInset))
         var hudContentTopInset: CGFloat = 0
 
         let rawNotch = attached ? effectiveNotchWidth(safeAreaTop: safeAreaTop, detectedNotchWidth: notchWidth) : 0
@@ -519,11 +582,8 @@ public struct IslandGeometry: Equatable {
             pillWidth = max(baseMin, min(target, maxCollapsed))
             pillHeight = attached ? max(safeAreaTop, 28) : 28
         case .hud:
-            let safeTop = ceil(max(0, safeAreaTop))
             if attached && safeTop > 0 {
                 hudContentTopInset = safeTop + 2
-            } else if !attached {
-                padTop += safeTop
             }
             pillWidth = 308
             pillHeight = hudContentTopInset + hudRowHeight
@@ -535,12 +595,20 @@ public struct IslandGeometry: Equatable {
         }
 
         pillWidth = min(pillWidth, max(160, screenFrame.width - 48))
-        let panelWidth = pillWidth + padX * 2
-        let panelHeight = pillHeight + padTop + padBottom
+        let fileCount = state == .collapsed ? min(9, max(0, collapsedFileCount)) : 0
+        let shelfHeight: CGFloat = fileCount > 0 ? 38 : 0
+        let shelfGap: CGFloat = fileCount > 0 ? 5 : 0
+        let shelfWidth = min(CGFloat(fileCount) * 42 + 12, max(160, screenFrame.width - 48))
+        let panelWidth = max(pillWidth, fileCount > 0 ? shelfWidth : 0) + padX * 2
+        let panelHeight = pillHeight + padTop + padBottom + shelfHeight + shelfGap
 
         let panelX = round(screenFrame.midX - panelWidth / 2.0)
-        let panelY = round(screenFrame.maxY - panelHeight)
-        let pillRect = NSRect(x: padX, y: padBottom, width: pillWidth, height: pillHeight)
+        let panelY = floor(panelTop - panelHeight)
+        let pillRect = NSRect(x: (panelWidth - pillWidth) / 2, y: padBottom + shelfHeight + shelfGap,
+                              width: pillWidth, height: pillHeight)
+        let shelfRect = fileCount > 0
+            ? NSRect(x: (panelWidth - shelfWidth) / 2, y: padBottom, width: shelfWidth, height: shelfHeight)
+            : nil
 
         let cornerRadius: CGFloat
         if case .expanded = state {
@@ -554,6 +622,7 @@ public struct IslandGeometry: Equatable {
         return IslandGeometry(
             panelFrame: NSRect(x: panelX, y: panelY, width: panelWidth, height: panelHeight),
             pillRect: pillRect,
+            collapsedShelfRect: shelfRect,
             pillSize: NSSize(width: pillWidth, height: pillHeight),
             cornerRadius: cornerRadius,
             earRadius: earRadius,
@@ -939,15 +1008,12 @@ public final class FocusTimerModel {
         remainingSeconds = totalSeconds
     }
 
-    /// Advances the timer by one second. Returns `true` on the tick that reaches 0.
+    /// Advances by elapsed whole seconds and reports completion once.
     @discardableResult
-    public func tick() -> Bool {
-        guard isRunning else { return false }
-        if remainingSeconds > 1 {
-            remainingSeconds -= 1
-            return false
-        }
-        remainingSeconds = 0
+    public func tick(elapsedSeconds: Int = 1) -> Bool {
+        guard isRunning, elapsedSeconds > 0 else { return false }
+        remainingSeconds = max(0, remainingSeconds - min(remainingSeconds, elapsedSeconds))
+        if remainingSeconds > 0 { return false }
         isRunning = false
         return true
     }

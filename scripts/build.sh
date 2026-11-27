@@ -33,6 +33,7 @@ swiftc \
     -framework QuickLookUI \
     -framework UniformTypeIdentifiers \
     -Xlinker -e -Xlinker _NSExtensionMain \
+    "${ROOT_DIR}/Sources/Core/Localization.swift" \
     "${ROOT_DIR}/Sources/Core/ClipboardHelper.swift" \
     "${ROOT_DIR}/Sources/Core/ToolAppearance.swift" \
     "${ROOT_DIR}/Sources/Tools/MarkdownPreview/ThemeCSS.swift" \
@@ -61,8 +62,12 @@ swiftc \
     -framework Security \
     -framework ServiceManagement \
     -framework EventKit \
+    -framework Network \
+    -framework SystemConfiguration \
+    -framework CoreImage \
     -framework QuickLookUI \
     -framework QuickLookThumbnailing \
+    "${ROOT_DIR}/Sources/Core/Localization.swift" \
     "${ROOT_DIR}/Sources/Core/ClipboardHelper.swift" \
     "${ROOT_DIR}/Sources/Core/ToolAppearance.swift" \
     "${ROOT_DIR}/Sources/Core/WebClipboardBridge.swift" \
@@ -74,19 +79,25 @@ swiftc \
     "${ROOT_DIR}/Sources/Tools/DynamicIsland/DynamicIslandMetrics.swift" \
     "${ROOT_DIR}/Sources/Tools/DynamicIsland/DynamicIslandManager.swift" \
     "${ROOT_DIR}/Sources/Tools/DynamicIsland/DynamicIslandWindowController.swift" \
+    "${ROOT_DIR}/Sources/Tools/DynamicIsland/IslandLayoutEditor.swift" \
     "${ROOT_DIR}/Sources/Tools/DynamicIsland/DynamicIslandViewController.swift" \
     "${ROOT_DIR}/Sources/Tools/PasswordBook/PasswordBookStore.swift" \
     "${ROOT_DIR}/Sources/Tools/PasswordBook/PasswordBookWindowController.swift" \
+    "${ROOT_DIR}/Sources/Tools/LANTransfer/LANTransferServer.swift" \
+    "${ROOT_DIR}/Sources/Tools/LANTransfer/LANTransferPage.swift" \
+    "${ROOT_DIR}/Sources/Tools/LANTransfer/LANTransferController.swift" \
+    "${ROOT_DIR}/Sources/Tools/LANTransfer/LANTransferViewController.swift" \
     "${ROOT_DIR}/Sources/Tools/Calendar/CalendarCountdown.swift" \
     "${ROOT_DIR}/Sources/Tools/Calendar/SystemCalendarStore.swift" \
     "${ROOT_DIR}/Sources/Tools/Calendar/CalendarMonthGrid.swift" \
-    "${ROOT_DIR}/Sources/Tools/Calendar/ChinaHolidayCalendar.swift" \
+    "${ROOT_DIR}/Sources/Tools/Calendar/HolidayCalendar.swift" \
     "${ROOT_DIR}/Sources/Tools/Calendar/CalendarCountdownWindowController.swift" \
     "${ROOT_DIR}/Sources/Tools/WebBookmarks/WebBookmarkStore.swift" \
     "${ROOT_DIR}/Sources/Tools/WebBookmarks/WebBookmarksWindowController.swift" \
     "${ROOT_DIR}/Sources/Tools/ExtensionsOverview/ExtensionsOverviewViewController.swift" \
     "${ROOT_DIR}/Sources/Tools/Installation/InstallationSupport.swift" \
     "${ROOT_DIR}/Sources/App/MainWindowController.swift" \
+    "${ROOT_DIR}/Sources/App/LanguageSettingsWindow.swift" \
     "${ROOT_DIR}/Sources/App/AppDelegate.swift" \
     "${ROOT_DIR}/Sources/App/main.swift" \
     -o "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
@@ -94,6 +105,13 @@ swiftc \
 cp "${ROOT_DIR}/Sources/App/Info.plist" "${APP_BUNDLE}/Contents/Info.plist"
 cp "${ROOT_DIR}/Samples/demo.md" "${APP_BUNDLE}/Contents/Resources/demo.md"
 cp "${ROOT_DIR}/Assets/MakeTools.icns" "${APP_BUNDLE}/Contents/Resources/"
+mkdir -p "${EXT_BUNDLE}/Contents/Resources"
+cp -R "${ROOT_DIR}/Resources/Languages" "${APP_BUNDLE}/Contents/Resources/"
+cp -R "${ROOT_DIR}/Resources/Languages" "${EXT_BUNDLE}/Contents/Resources/"
+for language in en zh-Hans; do
+    cp -R "${ROOT_DIR}/Resources/App/${language}.lproj" "${APP_BUNDLE}/Contents/Resources/"
+    cp -R "${ROOT_DIR}/Resources/QuickLook/${language}.lproj" "${EXT_BUNDLE}/Contents/Resources/"
+done
 printf 'APPL????' > "${APP_BUNDLE}/Contents/PkgInfo"
 
 echo "==> Ad-hoc code signing bundle"

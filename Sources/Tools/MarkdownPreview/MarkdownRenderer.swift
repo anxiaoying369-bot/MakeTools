@@ -16,11 +16,11 @@ public enum CalloutKind: String {
 
     public var displayTitle: String {
         switch self {
-        case .note: return "Note"
-        case .tip: return "Tip"
-        case .important: return "Important"
-        case .warning: return "Warning"
-        case .caution: return "Caution"
+        case .note: return L10n.text("markdown.alert.note", "Note")
+        case .tip: return L10n.text("markdown.alert.tip", "Tip")
+        case .important: return L10n.text("markdown.alert.important", "Important")
+        case .warning: return L10n.text("markdown.alert.warning", "Warning")
+        case .caution: return L10n.text("markdown.alert.caution", "Caution")
         }
     }
 
@@ -107,7 +107,7 @@ public enum MarkdownRenderer {
         let scriptBlock = interactive ? "\n\(interactiveScript)" : ""
         return """
         <!DOCTYPE html>
-        <html lang="zh-CN">
+        <html lang="\(escapeHTML(L10n.locale.identifier.replacingOccurrences(of: "_", with: "-")))">
         <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -543,7 +543,7 @@ public enum MarkdownRenderer {
                 }
                 htmlBlocks.append("""
                 <div class="frontmatter">
-                    <div class="frontmatter-title">Metadata</div>
+                    <div class="frontmatter-title">\(escapeHTML(L10n.text("markdown.metadata", "Metadata")))</div>
                     <div class="frontmatter-grid">\(rows)</div>
                 </div>
                 """)
@@ -636,7 +636,7 @@ public enum MarkdownRenderer {
         let headerHTML: String
         if interactive {
             let langLabel = language.isEmpty ? "code" : escapeHTML(language)
-            headerHTML = "<div class=\"code-header\"><span class=\"code-lang\">\(langLabel)</span><button type=\"button\" class=\"copy-code-btn\" data-copy-code>复制</button></div>"
+            headerHTML = "<div class=\"code-header\"><span class=\"code-lang\">\(langLabel)</span><button type=\"button\" class=\"copy-code-btn\" data-copy-code>\(escapeHTML(L10n.text("island.copy", "复制")))</button></div>"
         } else {
             headerHTML = language.isEmpty ? "" : "<span class=\"code-lang\">\(escapeHTML(language))</span>"
         }
@@ -795,7 +795,7 @@ public enum MarkdownRenderer {
         return out
     }
 
-    private static let interactiveScript: String = """
+    private static var interactiveScript: String { """
         <script>
         (function () {
             function getSelectedText() {
@@ -864,10 +864,10 @@ public enum MarkdownRenderer {
                 if (btn._copyTimer) {
                     clearTimeout(btn._copyTimer);
                 }
-                btn.textContent = '已复制 ✓';
+                btn.textContent = \(L10n.scriptString(L10n.text("common.copied", "已复制 ✓")));
                 btn.classList.add('copied');
                 btn._copyTimer = setTimeout(function () {
-                    btn.textContent = '复制';
+                    btn.textContent = \(L10n.scriptString(L10n.text("island.copy", "复制")));
                     btn.classList.remove('copied');
                     btn._copyTimer = null;
                 }, 1500);
@@ -908,7 +908,7 @@ public enum MarkdownRenderer {
             });
         })();
         </script>
-    """
+    """ }
 
     // MARK: - Block Line Helpers
 

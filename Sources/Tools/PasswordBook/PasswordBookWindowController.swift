@@ -13,10 +13,10 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
     private let accountField = NSTextField(string: "")
     private let passwordField = NSSecureTextField(string: "")
     private let status = NSTextField(wrappingLabelWithString: "")
-    private let copyAccountButton = NSButton(title: "复制账户", target: nil, action: nil)
-    private let copyPasswordButton = NSButton(title: "复制密码", target: nil, action: nil)
-    private let deleteButton = NSButton(title: "删除", target: nil, action: nil)
-    private let saveButton = NSButton(title: "保存", target: nil, action: nil)
+    private let copyAccountButton = NSButton(title: L10n.text("passwords.copyAccount", "复制账户"), target: nil, action: nil)
+    private let copyPasswordButton = NSButton(title: L10n.text("passwords.copyPassword", "复制密码"), target: nil, action: nil)
+    private let deleteButton = NSButton(title: L10n.text("passwords.delete", "删除"), target: nil, action: nil)
+    private let saveButton = NSButton(title: L10n.text("passwords.save", "保存"), target: nil, action: nil)
 
     private var entries: [PasswordBookEntry] = []
     private var isBusy = false
@@ -29,12 +29,13 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
 
     init() {
         let panel = PasswordBookPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 422, height: 261),
+            contentRect: NSRect(x: 0, y: 0, width: 518, height: 330),
             styleMask: [.titled, .closable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        panel.title = "密码本"
+        panel.backgroundColor = ToolAppearance.canvas
+        panel.title = L10n.text("island.passwordBook", "密码本")
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = false
@@ -86,25 +87,37 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
 
         recordPicker.target = self
         recordPicker.action = #selector(handleRecordChange)
-        recordPicker.setAccessibilityLabel("密码记录")
+        recordPicker.setAccessibilityLabel(L10n.text("passwords.passwordEntries", "密码记录"))
 
-        let grid = NSGridView(views: [
-            [label("保存记录"), recordPicker],
-            [label("网站名称"), websiteField],
-            [label("账户"), accountField],
-            [label("密码"), passwordField]
-        ])
-        grid.rowSpacing = 11
-        grid.columnSpacing = 12
-        grid.column(at: 0).xPlacement = .leading
-        grid.column(at: 1).xPlacement = .fill
-        grid.yPlacement = .center
+        let fields: [(String, NSView)] = [
+            (L10n.text("passwords.saveEntry", "保存记录"), recordPicker),
+            (L10n.text("passwords.website", "网站名称"), websiteField),
+            (L10n.text("passwords.account", "账户"), accountField),
+            (L10n.text("passwords.password", "密码"), passwordField)
+        ]
+        let form = NSStackView()
+        form.orientation = .vertical
+        form.alignment = .leading
+        form.spacing = 9
+        for (title, field) in fields {
+            let caption = label(title)
+            caption.lineBreakMode = .byTruncatingTail
+            caption.toolTip = title
+            caption.widthAnchor.constraint(equalToConstant: 116).isActive = true
+            field.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
+            let row = NSStackView(views: [caption, field])
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 11
+            form.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: form.widthAnchor).isActive = true
+        }
 
-        websiteField.placeholderString = "例如 example.com"
-        websiteField.setAccessibilityLabel("网站名称")
-        accountField.placeholderString = "用户名或邮箱"
-        accountField.setAccessibilityLabel("账户")
-        passwordField.setAccessibilityLabel("密码")
+        websiteField.placeholderString = L10n.text("passwords.forExampleExampleCom", "例如 example.com")
+        websiteField.setAccessibilityLabel(L10n.text("passwords.website", "网站名称"))
+        accountField.placeholderString = L10n.text("passwords.usernameOrEmail", "用户名或邮箱")
+        accountField.setAccessibilityLabel(L10n.text("passwords.account", "账户"))
+        passwordField.setAccessibilityLabel(L10n.text("passwords.password", "密码"))
         websiteField.nextKeyView = accountField
         accountField.nextKeyView = passwordField
         passwordField.nextKeyView = saveButton
@@ -112,7 +125,7 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
 
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
-        status.setAccessibilityLabel("密码本状态")
+        status.setAccessibilityLabel(L10n.text("passwords.passwordBookStatus", "密码本状态"))
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         setup(copyAccountButton, symbol: "person.crop.rectangle", action: #selector(handleCopyAccount))
@@ -129,21 +142,22 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
         actions.alignment = .centerY
         actions.spacing = 8
 
-        for view in [grid, actions, status] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            root.addSubview(view)
+        let heading = ToolAppearance.sectionTitle(L10n.text("island.passwordBook", "密码本"), symbol: "lock.shield")
+        let formCard = ToolAppearance.section(form)
+        let stack = NSStackView(views: [heading, formCard, actions, status])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        for view in [formCard, actions, status] {
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
+        root.addSubview(stack)
         NSLayoutConstraint.activate([
-            grid.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
-            grid.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
-            grid.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
-            actions.topAnchor.constraint(equalTo: grid.bottomAnchor, constant: 18),
-            actions.leadingAnchor.constraint(equalTo: grid.leadingAnchor),
-            actions.trailingAnchor.constraint(equalTo: grid.trailingAnchor),
-            status.topAnchor.constraint(equalTo: actions.bottomAnchor, constant: 10),
-            status.leadingAnchor.constraint(equalTo: grid.leadingAnchor),
-            status.trailingAnchor.constraint(equalTo: grid.trailingAnchor),
-            status.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -14)
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 18),
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -14)
         ])
 
         populatePicker(selecting: nil)
@@ -163,7 +177,7 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
 
     private func populatePicker(selecting id: UUID?) {
         recordPicker.removeAllItems()
-        recordPicker.addItem(withTitle: "新增记录")
+        recordPicker.addItem(withTitle: L10n.text("passwords.newEntry", "新增记录"))
         for entry in entries {
             recordPicker.menu?.addItem(NSMenuItem(title: "\(entry.website) — \(entry.account)", action: nil, keyEquivalent: ""))
         }
@@ -177,8 +191,8 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
         websiteField.stringValue = entry?.website ?? ""
         accountField.stringValue = entry?.account ?? ""
         passwordField.stringValue = ""
-        passwordField.placeholderString = entry == nil ? "输入密码" : "留空保留已保存的密码"
-        saveButton.title = entry == nil ? "保存" : "更新"
+        passwordField.placeholderString = entry == nil ? L10n.text("passwords.enterPassword", "输入密码") : L10n.text("passwords.leaveBlankToKeepTheSavedPassword", "留空保留已保存的密码")
+        saveButton.title = entry == nil ? L10n.text("passwords.save", "保存") : L10n.text("passwords.update", "更新")
         updateControls()
     }
 
@@ -211,14 +225,15 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func loadEntries(selecting id: UUID?) {
+        guard !isBusy else { return }
         hasLoadedEntries = false
-        status.stringValue = "正在读取钥匙串…"
+        status.stringValue = L10n.text("passwords.readingTheKeychain", "正在读取钥匙串…")
         perform({ try $0.entries() }) { [weak self] entries in
             guard let self else { return }
             hasLoadedEntries = true
             self.entries = entries
             populatePicker(selecting: id)
-            status.stringValue = entries.isEmpty ? "还没有保存的记录。" : ""
+            status.stringValue = entries.isEmpty ? L10n.text("passwords.noSavedEntriesYet", "还没有保存的记录。") : ""
             if window?.isKeyWindow == true { window?.makeFirstResponder(websiteField) }
         }
     }
@@ -234,7 +249,7 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
         let password = passwordField.stringValue
         let existing = selectedEntry
         guard !website.isEmpty, !account.isEmpty, existing != nil || !password.isEmpty else {
-            status.stringValue = "请填写网站名称、账户和密码。"
+            status.stringValue = L10n.text("passwords.enterAWebsiteAccountAndPassword", "请填写网站名称、账户和密码。")
             return
         }
 
@@ -245,18 +260,18 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
             entries.append(entry)
             PasswordBookStore.sort(&entries)
             populatePicker(selecting: entry.id)
-            status.stringValue = "已保存至钥匙串。"
+            status.stringValue = L10n.text("passwords.savedToTheKeychain", "已保存至钥匙串。")
         }
     }
 
     @objc private func handleDelete() {
         guard !isBusy, let entry = selectedEntry, let window, window.attachedSheet == nil else { return }
         let alert = NSAlert()
-        alert.messageText = "删除这条密码记录？"
-        alert.informativeText = "\(entry.website) · \(entry.account) 将从本机钥匙串移除。"
+        alert.messageText = L10n.text("passwords.deleteThisPasswordEntry", "删除这条密码记录？")
+        alert.informativeText = L10n.text("passwords.willBeRemovedFromTheLocalKeychain", "{arg1} · {arg2} 将从本机钥匙串移除。", ["arg1": String(describing: entry.website), "arg2": String(describing: entry.account)])
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "删除").hasDestructiveAction = true
-        let cancel = alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: L10n.text("passwords.delete", "删除")).hasDestructiveAction = true
+        let cancel = alert.addButton(withTitle: L10n.text("passwords.cancel", "取消"))
         cancel.keyEquivalent = "\r"
         alert.buttons[0].keyEquivalent = ""
         alert.beginSheetModal(for: window) { [weak self] result in
@@ -265,7 +280,7 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
                 guard let self else { return }
                 entries.removeAll { $0.id == entry.id }
                 populatePicker(selecting: nil)
-                status.stringValue = "已删除记录。"
+                status.stringValue = L10n.text("passwords.entryDeleted", "已删除记录。")
             }
         }
     }
@@ -273,7 +288,7 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
     @objc private func handleCopyAccount() {
         guard let entry = selectedEntry else { return }
         ClipboardHelper.copyText(entry.account)
-        status.stringValue = "已复制账户。"
+        status.stringValue = L10n.text("passwords.accountCopied", "已复制账户。")
     }
 
     @objc private func handleCopyPassword() {
@@ -281,8 +296,8 @@ final class PasswordBookWindowController: NSWindowController, NSWindowDelegate {
         perform({ try $0.password(for: entry.id) }) { [weak self] password in
             guard let self, window?.isVisible == true else { return }
             status.stringValue = ClipboardHelper.copyPassword(password)
-                ? "已复制密码。若剪贴板内容未改变，将在 45 秒后清除。"
-                : "无法复制密码。"
+                ? L10n.text("passwords.passwordCopiedItWillBeClearedAfter", "已复制密码。若剪贴板内容未改变，将在 45 秒后清除。")
+                : L10n.text("passwords.couldNotCopyThePassword", "无法复制密码。")
         }
     }
 }
